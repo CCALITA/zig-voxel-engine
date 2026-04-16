@@ -13,9 +13,16 @@ pub const mesh = @import("world/mesh.zig");
 pub const terrain_gen = @import("world/terrain_gen.zig");
 pub const noise = @import("world/noise.zig");
 pub const chunk_map = @import("world/chunk_map.zig");
+pub const raycast = @import("gameplay/raycast.zig");
+pub const inventory_mod = @import("gameplay/inventory.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
+
+// Player dimensions (shared between collision and block placement)
+const PLAYER_WIDTH: f32 = 0.6;
+const PLAYER_HEIGHT: f32 = 1.8;
+const PLAYER_HALF_W: f32 = PLAYER_WIDTH / 2.0;
 
 pub const Engine = struct {
     allocator: std.mem.Allocator,
@@ -36,6 +43,12 @@ pub const Engine = struct {
     player_z: f32,
     player_vy: f32,
     on_ground: bool,
+
+    // Interaction state
+    selected_slot: u8,
+    last_left_click: bool,
+    last_right_click: bool,
+    inventory: inventory_mod.Inventory,
 
     const ChunkKey = struct { x: i32, z: i32 };
 
@@ -99,6 +112,23 @@ pub const Engine = struct {
 
         const aspect = 1280.0 / 720.0;
 
+        // Initialize inventory with default hotbar blocks
+        var inventory = inventory_mod.Inventory.init();
+        const hotbar_blocks = [_]block.BlockId{
+            block.STONE,
+            block.DIRT,
+            block.GRASS,
+            block.COBBLESTONE,
+            block.OAK_PLANKS,
+            block.SAND,
+            block.OAK_LOG,
+            block.OAK_LEAVES,
+            block.BEDROCK,
+        };
+        for (hotbar_blocks) |bid| {
+            _ = inventory.addItem(@as(inventory_mod.ItemId, bid), 64);
+        }
+
         return .{
             .allocator = allocator,
             .window = window,
@@ -114,6 +144,10 @@ pub const Engine = struct {
             .player_z = 8.0,
             .player_vy = 0.0,
             .on_ground = false,
+            .selected_slot = 0,
+            .last_left_click = false,
+            .last_right_click = false,
+            .inventory = inventory,
         };
     }
 
@@ -163,6 +197,17 @@ pub const Engine = struct {
                 self.window.handle.setShouldClose(true);
             }
 
+            // Hotbar selection (number keys 1-9)
+            const number_keys = [_]zglfw.Key{ .one, .two, .three, .four, .five, .six, .seven, .eight, .nine };
+            for (number_keys, 0..) |key, i| {
+                if (self.window.handle.getKey(key) == .press) {
+                    self.selected_slot = @intCast(i);
+                }
+            }
+
+            // Block interaction (left/right mouse click)
+            self.handleBlockInteraction();
+
             // Horizontal movement based on camera direction
             const fwd = self.camera.forward();
             const rt = self.camera.right();
@@ -181,13 +226,9 @@ pub const Engine = struct {
             self.player_vy += gravity * dt;
 
             // Attempt movement with simple AABB collision
-            const player_width: f32 = 0.6;
-            const player_height: f32 = 1.8;
-            const half_w = player_width / 2.0;
-
             // Try Y movement first (gravity/jump)
             const new_y = self.player_y + self.player_vy * dt;
-            if (!self.collidesAt(self.player_x, new_y, self.player_z, half_w, player_height)) {
+            if (!self.collidesAt(self.player_x, new_y, self.player_z, PLAYER_HALF_W, PLAYER_HEIGHT)) {
                 self.player_y = new_y;
                 self.on_ground = false;
             } else {
@@ -197,13 +238,13 @@ pub const Engine = struct {
 
             // Try X movement
             const new_x = self.player_x + move_x;
-            if (!self.collidesAt(new_x, self.player_y, self.player_z, half_w, player_height)) {
+            if (!self.collidesAt(new_x, self.player_y, self.player_z, PLAYER_HALF_W, PLAYER_HEIGHT)) {
                 self.player_x = new_x;
             }
 
             // Try Z movement
             const new_z = self.player_z + move_z;
-            if (!self.collidesAt(self.player_x, self.player_y, new_z, half_w, player_height)) {
+            if (!self.collidesAt(self.player_x, self.player_y, new_z, PLAYER_HALF_W, PLAYER_HEIGHT)) {
                 self.player_z = new_z;
             }
 
@@ -266,6 +307,160 @@ pub const Engine = struct {
         const lz: u4 = @intCast(@mod(wz, @as(i32, Chunk.SIZE)));
         return chunk.getBlock(lx, ly, lz);
     }
+
+    fn setWorldBlock(self: *Engine, wx: i32, wy: i32, wz: i32, id: block.BlockId) bool {
+        if (wy < 0 or wy >= Chunk.SIZE) return false;
+        const cx = @divFloor(wx, @as(i32, Chunk.SIZE));
+        const cz = @divFloor(wz, @as(i32, Chunk.SIZE));
+        const chunk_ptr = self.chunks.getPtr(.{ .x = cx, .z = cz }) orelse return false;
+        const lx: u4 = @intCast(@mod(wx, @as(i32, Chunk.SIZE)));
+        const ly: u4 = @intCast(@mod(wy, @as(i32, Chunk.SIZE)));
+        const lz: u4 = @intCast(@mod(wz, @as(i32, Chunk.SIZE)));
+        chunk_ptr.setBlock(lx, ly, lz, id);
+        return true;
+    }
+
+    /// Raycast solidity wrapper. Uses a static var to pass the Engine pointer
+    /// into the function-pointer callback required by raycast.cast().
+    const RaycastBridge = struct {
+        var engine_ctx: ?*Engine = null;
+
+        fn isSolid(x: i32, y: i32, z: i32) bool {
+            const eng = engine_ctx orelse return false;
+            const bid = eng.getWorldBlock(x, y, z) orelse return false;
+            return block.isSolid(bid);
+        }
+    };
+
+    fn handleBlockInteraction(self: *Engine) void {
+        const left_pressed = self.window.handle.getMouseButton(.left) == .press;
+        const right_pressed = self.window.handle.getMouseButton(.right) == .press;
+
+        const left_just_pressed = left_pressed and !self.last_left_click;
+        const right_just_pressed = right_pressed and !self.last_right_click;
+
+        self.last_left_click = left_pressed;
+        self.last_right_click = right_pressed;
+
+        if (!left_just_pressed and !right_just_pressed) return;
+
+        // Cast ray from camera
+        const fwd = self.camera.forward();
+        RaycastBridge.engine_ctx = self;
+        defer RaycastBridge.engine_ctx = null;
+
+        const hit = raycast.cast(
+            self.camera.pos[0],
+            self.camera.pos[1],
+            self.camera.pos[2],
+            fwd[0],
+            fwd[1],
+            fwd[2],
+            5.0,
+            &RaycastBridge.isSolid,
+        ) orelse return;
+
+        if (left_just_pressed) {
+            self.renderer.waitIdle();
+            self.breakBlock(hit.bx, hit.by, hit.bz);
+        } else if (right_just_pressed) {
+            self.renderer.waitIdle();
+            self.placeBlock(hit.adjacent_x, hit.adjacent_y, hit.adjacent_z);
+        }
+    }
+
+    fn breakBlock(self: *Engine, wx: i32, wy: i32, wz: i32) void {
+        if (!self.setWorldBlock(wx, wy, wz, block.AIR)) return;
+        self.remeshAffectedChunks(wx, wz);
+    }
+
+    fn placeBlock(self: *Engine, wx: i32, wy: i32, wz: i32) void {
+        const bx_f: f32 = @floatFromInt(wx);
+        const by_f: f32 = @floatFromInt(wy);
+        const bz_f: f32 = @floatFromInt(wz);
+
+        // Player AABB
+        const p_min_x = self.player_x - PLAYER_HALF_W;
+        const p_min_y = self.player_y;
+        const p_min_z = self.player_z - PLAYER_HALF_W;
+        const p_max_x = self.player_x + PLAYER_HALF_W;
+        const p_max_y = self.player_y + PLAYER_HEIGHT;
+        const p_max_z = self.player_z + PLAYER_HALF_W;
+
+        // Reject if block would overlap player
+        if (p_max_x > bx_f and p_min_x < bx_f + 1.0 and
+            p_max_y > by_f and p_min_y < by_f + 1.0 and
+            p_max_z > bz_f and p_min_z < bz_f + 1.0)
+        {
+            return;
+        }
+
+        const slot = self.inventory.getSlot(self.selected_slot);
+        const block_id: block.BlockId = if (!slot.isEmpty())
+            @intCast(slot.item)
+        else
+            block.STONE;
+
+        if (!self.setWorldBlock(wx, wy, wz, block_id)) return;
+        self.remeshAffectedChunks(wx, wz);
+    }
+
+    /// Re-mesh the chunk containing (wx, wz) and any neighbor chunks
+    /// if the block is on a chunk border.
+    fn remeshAffectedChunks(self: *Engine, wx: i32, wz: i32) void {
+        const size: i32 = Chunk.SIZE;
+        const cx = @divFloor(wx, size);
+        const cz = @divFloor(wz, size);
+        const lx = @mod(wx, size);
+        const lz = @mod(wz, size);
+
+        self.remeshChunkByKey(cx, cz);
+
+        if (lx == 0) self.remeshChunkByKey(cx - 1, cz);
+        if (lx == size - 1) self.remeshChunkByKey(cx + 1, cz);
+        if (lz == 0) self.remeshChunkByKey(cx, cz - 1);
+        if (lz == size - 1) self.remeshChunkByKey(cx, cz + 1);
+    }
+
+    fn remeshChunkByKey(self: *Engine, cx: i32, cz: i32) void {
+        const chunk_ptr = self.chunks.getPtr(.{ .x = cx, .z = cz }) orelse return;
+
+        const neighbors = mesh_indexed.NeighborChunks{
+            .north = if (self.chunks.getPtr(.{ .x = cx, .z = cz - 1 })) |p| p else null,
+            .south = if (self.chunks.getPtr(.{ .x = cx, .z = cz + 1 })) |p| p else null,
+            .east = if (self.chunks.getPtr(.{ .x = cx + 1, .z = cz })) |p| p else null,
+            .west = if (self.chunks.getPtr(.{ .x = cx - 1, .z = cz })) |p| p else null,
+        };
+
+        var mesh_data = mesh_indexed.generateMeshWithNeighbors(self.allocator, chunk_ptr, neighbors) catch return;
+        defer mesh_data.deinit();
+
+        const world_x = cx * @as(i32, Chunk.SIZE);
+        const world_z = cz * @as(i32, Chunk.SIZE);
+
+        // Remove old chunk render data for this chunk
+        self.removeChunkRender(world_x, 0, world_z);
+
+        // Upload new mesh (skip if empty -- chunk is now all air)
+        self.renderer.uploadChunk(mesh_data.vertices, mesh_data.indices, world_x, 0, world_z) catch return;
+    }
+
+    fn removeChunkRender(self: *Engine, world_x: i32, world_y: i32, world_z: i32) void {
+        var i: usize = 0;
+        while (i < self.renderer.chunk_renders.items.len) {
+            const cr = self.renderer.chunk_renders.items[i];
+            if (cr.world_x == world_x and cr.world_y == world_y and cr.world_z == world_z) {
+                // Destroy GPU resources
+                self.renderer.vkd.destroyBuffer(self.renderer.device, cr.vertex_buffer, null);
+                self.renderer.vkd.freeMemory(self.renderer.device, cr.vertex_buffer_memory, null);
+                self.renderer.vkd.destroyBuffer(self.renderer.device, cr.index_buffer, null);
+                self.renderer.vkd.freeMemory(self.renderer.device, cr.index_buffer_memory, null);
+                _ = self.renderer.chunk_renders.swapRemove(i);
+                return;
+            }
+            i += 1;
+        }
+    }
 };
 
 test "subsystem count" {
@@ -298,4 +493,12 @@ test "noise module" {
 
 test "chunk_map module" {
     _ = chunk_map;
+}
+
+test "raycast module" {
+    _ = raycast;
+}
+
+test "inventory module" {
+    _ = inventory_mod;
 }
