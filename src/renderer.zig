@@ -8,6 +8,18 @@ const Self = @This();
 
 const MAX_FRAMES_IN_FLIGHT = 2;
 
+pub const ChunkRenderData = struct {
+    vertex_buffer: vk.Buffer,
+    vertex_buffer_memory: vk.DeviceMemory,
+    vertex_count: u32,
+    index_buffer: vk.Buffer,
+    index_buffer_memory: vk.DeviceMemory,
+    index_count: u32,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+};
+
 // Dispatch tables
 const BaseDispatch = vk.BaseWrapper;
 const InstanceDispatch = vk.InstanceWrapper;
@@ -62,23 +74,16 @@ present_family: u32,
 terrain_pipeline: vk.Pipeline,
 terrain_pipeline_layout: vk.PipelineLayout,
 
-// Vertex buffer for chunk mesh
-vertex_buffer: vk.Buffer,
-vertex_buffer_memory: vk.DeviceMemory,
-vertex_count: u32,
-
-// Index buffer for indexed drawing
-index_buffer: vk.Buffer,
-index_buffer_memory: vk.DeviceMemory,
-index_count: u32,
+// Per-chunk render data
+chunk_renders: std.ArrayList(ChunkRenderData),
 
 // Depth buffer
 depth_image: vk.Image,
 depth_image_view: vk.ImageView,
 depth_image_memory: vk.DeviceMemory,
 
-// Current MVP matrix (set each frame)
-current_mvp: [4][4]f32,
+// Current VP matrix (set each frame; per-chunk model applied in recordCommandBuffer)
+current_vp: [4][4]f32,
 
 pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     var self: Self = undefined;
@@ -149,17 +154,9 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     self.terrain_pipeline = pl.pipeline;
     self.terrain_pipeline_layout = pl.layout;
 
-    // Initialize vertex buffer as null (will be set by uploadChunkMesh)
-    self.vertex_buffer = .null_handle;
-    self.vertex_buffer_memory = .null_handle;
-    self.vertex_count = 0;
-
-    // Initialize index buffer as null (will be set by uploadChunkMesh)
-    self.index_buffer = .null_handle;
-    self.index_buffer_memory = .null_handle;
-    self.index_count = 0;
-
-    self.current_mvp = std.mem.zeroes([4][4]f32);
+    // Initialize per-chunk render data list
+    self.chunk_renders = std.ArrayList(ChunkRenderData).empty;
+    self.current_vp = std.mem.zeroes([4][4]f32);
 
     return self;
 }
@@ -169,14 +166,8 @@ pub fn deinit(self: *Self) void {
     self.destroySyncObjects();
     self.vkd.destroyCommandPool(self.device, self.command_pool, null);
     self.destroyFramebuffers();
-    if (self.vertex_buffer != .null_handle) {
-        self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
-        self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
-    }
-    if (self.index_buffer != .null_handle) {
-        self.vkd.destroyBuffer(self.device, self.index_buffer, null);
-        self.vkd.freeMemory(self.device, self.index_buffer_memory, null);
-    }
+    self.clearChunks();
+    self.chunk_renders.deinit(self.allocator);
     self.vkd.destroyPipeline(self.device, self.terrain_pipeline, null);
     self.vkd.destroyPipelineLayout(self.device, self.terrain_pipeline_layout, null);
     self.vkd.destroyRenderPass(self.device, self.render_pass, null);
@@ -187,8 +178,8 @@ pub fn deinit(self: *Self) void {
     self.vki.destroyInstance(self.instance, null);
 }
 
-pub fn drawFrame(self: *Self, mvp: [4][4]f32) !void {
-    self.current_mvp = mvp;
+pub fn drawFrame(self: *Self, vp: [4][4]f32) !void {
+    self.current_vp = vp;
     const frame = self.current_frame;
 
     // Wait for previous frame's fence
@@ -634,11 +625,11 @@ fn createRenderPass(self: *Self) !vk.RenderPass {
 fn createFramebuffers(self: *Self) !void {
     self.framebuffers = try self.allocator.alloc(vk.Framebuffer, self.swapchain_image_views.len);
     for (self.swapchain_image_views, 0..) |view, i| {
-        const attachments = [_]vk.ImageView{ view, self.depth_image_view };
+        const fb_attachments = [_]vk.ImageView{ view, self.depth_image_view };
         self.framebuffers[i] = try self.vkd.createFramebuffer(self.device, &.{
             .render_pass = self.render_pass,
-            .attachment_count = attachments.len,
-            .p_attachments = &attachments,
+            .attachment_count = fb_attachments.len,
+            .p_attachments = &fb_attachments,
             .width = self.swapchain_extent.width,
             .height = self.swapchain_extent.height,
             .layers = 1,
@@ -706,8 +697,7 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
         .p_clear_values = &clear_values,
     }, .@"inline");
 
-    // Bind terrain pipeline and draw chunk mesh (indexed)
-    if (self.vertex_buffer != .null_handle and self.index_buffer != .null_handle and self.index_count > 0) {
+    if (self.chunk_renders.items.len > 0) {
         self.vkd.cmdBindPipeline(cmd, .graphics, self.terrain_pipeline);
 
         // Dynamic viewport
@@ -726,27 +716,37 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
             .extent = self.swapchain_extent,
         }});
 
-        // Bind vertex buffer
-        const offsets = [_]vk.DeviceSize{0};
-        const buffers = [_]vk.Buffer{self.vertex_buffer};
-        self.vkd.cmdBindVertexBuffers(cmd, 0, 1, &buffers, &offsets);
+        for (self.chunk_renders.items) |chunk_data| {
+            // Bind this chunk's vertex buffer
+            const offsets = [_]vk.DeviceSize{0};
+            const vb = [_]vk.Buffer{chunk_data.vertex_buffer};
+            self.vkd.cmdBindVertexBuffers(cmd, 0, 1, &vb, &offsets);
 
-        // Bind index buffer
-        self.vkd.cmdBindIndexBuffer(cmd, self.index_buffer, 0, .uint32);
+            // Bind this chunk's index buffer
+            self.vkd.cmdBindIndexBuffer(cmd, chunk_data.index_buffer, 0, .uint32);
 
-        // Push MVP matrix
-        const push = pipeline_mod.PushConstants{ .mvp = self.current_mvp };
-        self.vkd.cmdPushConstants(
-            cmd,
-            self.terrain_pipeline_layout,
-            .{ .vertex_bit = true },
-            0,
-            @sizeOf(pipeline_mod.PushConstants),
-            @ptrCast(&push),
-        );
+            // Compute model matrix (translation by world offset)
+            const model = translationMatrix(
+                @floatFromInt(chunk_data.world_x),
+                @floatFromInt(chunk_data.world_y),
+                @floatFromInt(chunk_data.world_z),
+            );
 
-        // Draw indexed
-        self.vkd.cmdDrawIndexed(cmd, self.index_count, 1, 0, 0, 0);
+            // MVP = VP * model
+            const mvp = mat4Mul(self.current_vp, model);
+            const push = pipeline_mod.PushConstants{ .mvp = mvp };
+            self.vkd.cmdPushConstants(
+                cmd,
+                self.terrain_pipeline_layout,
+                .{ .vertex_bit = true },
+                0,
+                @sizeOf(pipeline_mod.PushConstants),
+                @ptrCast(&push),
+            );
+
+            // Draw indexed
+            self.vkd.cmdDrawIndexed(cmd, chunk_data.index_count, 1, 0, 0, 0);
+        }
     }
 
     self.vkd.cmdEndRenderPass(cmd);
@@ -764,65 +764,81 @@ fn recreateSwapchain(self: *Self) !void {
     try self.createFramebuffers();
 }
 
-pub fn uploadChunkMesh(self: *Self, vertices: []const mesh_indexed.Vertex, indices: []const u32) !void {
-    // Clean up previous buffers if they exist
-    if (self.vertex_buffer != .null_handle or self.index_buffer != .null_handle) {
-        self.waitIdle();
-        if (self.vertex_buffer != .null_handle) {
-            self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
-            self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
-        }
-        if (self.index_buffer != .null_handle) {
-            self.vkd.destroyBuffer(self.device, self.index_buffer, null);
-            self.vkd.freeMemory(self.device, self.index_buffer_memory, null);
-        }
-    }
-
-    self.vertex_count = @intCast(vertices.len);
-    self.index_count = @intCast(indices.len);
-    if (vertices.len == 0 or indices.len == 0) {
-        self.vertex_buffer = .null_handle;
-        self.vertex_buffer_memory = .null_handle;
-        self.index_buffer = .null_handle;
-        self.index_buffer_memory = .null_handle;
-        self.vertex_count = 0;
-        self.index_count = 0;
-        return;
-    }
+pub fn uploadChunk(self: *Self, vertices: []const mesh_indexed.Vertex, indices: []const u32, world_x: i32, world_y: i32, world_z: i32) !void {
+    if (vertices.len == 0 or indices.len == 0) return;
 
     // Create vertex buffer
     const vb = try self.createHostBuffer(
         .{ .vertex_buffer_bit = true },
         @intCast(vertices.len * @sizeOf(mesh_indexed.Vertex)),
     );
-    self.vertex_buffer = vb.buffer;
-    self.vertex_buffer_memory = vb.memory;
 
     // If index buffer creation fails, clean up vertex buffer
     errdefer {
-        self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
-        self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
-        self.vertex_buffer = .null_handle;
-        self.vertex_buffer_memory = .null_handle;
+        self.vkd.destroyBuffer(self.device, vb.buffer, null);
+        self.vkd.freeMemory(self.device, vb.memory, null);
     }
 
-    const vb_data_ptr = try self.vkd.mapMemory(self.device, self.vertex_buffer_memory, 0, vb.size, .{});
+    const vb_data_ptr = try self.vkd.mapMemory(self.device, vb.memory, 0, vb.size, .{});
     const vb_dst: [*]mesh_indexed.Vertex = @ptrCast(@alignCast(vb_data_ptr));
     @memcpy(vb_dst[0..vertices.len], vertices);
-    self.vkd.unmapMemory(self.device, self.vertex_buffer_memory);
+    self.vkd.unmapMemory(self.device, vb.memory);
 
     // Create index buffer
     const ib = try self.createHostBuffer(
         .{ .index_buffer_bit = true },
         @intCast(indices.len * @sizeOf(u32)),
     );
-    self.index_buffer = ib.buffer;
-    self.index_buffer_memory = ib.memory;
 
-    const ib_data_ptr = try self.vkd.mapMemory(self.device, self.index_buffer_memory, 0, ib.size, .{});
+    const ib_data_ptr = try self.vkd.mapMemory(self.device, ib.memory, 0, ib.size, .{});
     const ib_dst: [*]u32 = @ptrCast(@alignCast(ib_data_ptr));
     @memcpy(ib_dst[0..indices.len], indices);
-    self.vkd.unmapMemory(self.device, self.index_buffer_memory);
+    self.vkd.unmapMemory(self.device, ib.memory);
+
+    try self.chunk_renders.append(self.allocator, .{
+        .vertex_buffer = vb.buffer,
+        .vertex_buffer_memory = vb.memory,
+        .vertex_count = @intCast(vertices.len),
+        .index_buffer = ib.buffer,
+        .index_buffer_memory = ib.memory,
+        .index_count = @intCast(indices.len),
+        .world_x = world_x,
+        .world_y = world_y,
+        .world_z = world_z,
+    });
+}
+
+pub fn clearChunks(self: *Self) void {
+    for (self.chunk_renders.items) |chunk_data| {
+        self.vkd.destroyBuffer(self.device, chunk_data.vertex_buffer, null);
+        self.vkd.freeMemory(self.device, chunk_data.vertex_buffer_memory, null);
+        self.vkd.destroyBuffer(self.device, chunk_data.index_buffer, null);
+        self.vkd.freeMemory(self.device, chunk_data.index_buffer_memory, null);
+    }
+    self.chunk_renders.clearRetainingCapacity();
+}
+
+fn translationMatrix(tx: f32, ty: f32, tz: f32) [4][4]f32 {
+    return .{
+        .{ 1, 0, 0, 0 },
+        .{ 0, 1, 0, 0 },
+        .{ 0, 0, 1, 0 },
+        .{ tx, ty, tz, 1 },
+    };
+}
+
+fn mat4Mul(a: [4][4]f32, b: [4][4]f32) [4][4]f32 {
+    var result: [4][4]f32 = undefined;
+    for (0..4) |row| {
+        for (0..4) |col| {
+            var sum: f32 = 0;
+            for (0..4) |k| {
+                sum += a[row][k] * b[k][col];
+            }
+            result[row][col] = sum;
+        }
+    }
+    return result;
 }
 
 const HostBuffer = struct {
