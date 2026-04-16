@@ -2,10 +2,13 @@
 /// Each exposed face produces 4 unique vertices and 6 indices (two triangles),
 /// reducing vertex count compared to the naive 6-vertices-per-quad approach.
 ///
-/// Vertex format is identical to mesh.zig (packed u32).
+/// Vertex format (packed u32):
+///   x(5) y(5) z(5) face(3) corner(2) ao(2) light(4) tex(6) = 32 bits
 const std = @import("std");
 const block = @import("block.zig");
 const Chunk = @import("chunk.zig");
+const ao_mod = @import("ao.zig");
+const light_mod = @import("light.zig");
 
 pub const Vertex = packed struct(u32) {
     x: u5,
@@ -13,7 +16,9 @@ pub const Vertex = packed struct(u32) {
     z: u5,
     face: u3,
     corner: u2,
-    tex: u12,
+    ao: u2,
+    light: u4,
+    tex: u6,
 };
 
 pub const IndexedMeshData = struct {
@@ -102,6 +107,9 @@ pub fn generateMeshWithNeighbors(allocator: std.mem.Allocator, chunk: *const Chu
     var indices: std.ArrayList(u32) = .empty;
     errdefer indices.deinit(allocator);
 
+    // Compute lighting once for the entire chunk
+    const light_map = light_mod.computeFullLighting(chunk);
+
     for (0..Chunk.SIZE) |yi| {
         for (0..Chunk.SIZE) |zi| {
             for (0..Chunk.SIZE) |xi| {
@@ -113,6 +121,7 @@ pub fn generateMeshWithNeighbors(allocator: std.mem.Allocator, chunk: *const Chu
                 if (id == block.AIR) continue;
 
                 const def = block.get(id);
+                const light_level = light_map.getCombinedLight(bx, by, bz);
 
                 for (0..6) |face_idx| {
                     const nx = @as(i32, bx) + face_normals[face_idx][0];
@@ -124,6 +133,7 @@ pub fn generateMeshWithNeighbors(allocator: std.mem.Allocator, chunk: *const Chu
                     const tex = def.tex[face_idx];
                     const corners = face_vertices[face_idx];
                     const base: u32 = @intCast(vertices.items.len);
+                    const face_ao = ao_mod.computeFaceAO(chunk, bx, by, bz, @intCast(face_idx));
 
                     for (0..4) |ci| {
                         const corner = corners[ci];
@@ -133,6 +143,8 @@ pub fn generateMeshWithNeighbors(allocator: std.mem.Allocator, chunk: *const Chu
                             .z = @as(u5, bz) + corner[2],
                             .face = @intCast(face_idx),
                             .corner = @intCast(ci),
+                            .ao = face_ao.corners[ci],
+                            .light = light_level,
                             .tex = @intCast(tex),
                         });
                     }
