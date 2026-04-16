@@ -25,6 +25,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/world/block.zig"),
         .target = target,
     });
+    const noise_mod = b.addModule("noise", .{
+        .root_source_file = b.path("src/world/noise.zig"),
+        .target = target,
+    });
     const chunk_mod = b.addModule("chunk", .{
         .root_source_file = b.path("src/world/chunk.zig"),
         .target = target,
@@ -97,8 +101,24 @@ pub fn build(b: *std.Build) void {
     });
     const run_physics_collision_tests = b.addRunArtifact(physics_collision_tests);
 
+    // Cave generation tests — wire world modules via named imports.
+    const caves_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/world/worldgen/caves.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "block", .module = block_mod },
+                .{ .name = "chunk", .module = chunk_mod },
+                .{ .name = "noise", .module = noise_mod },
+            },
+        }),
+    });
+    const run_caves_tests = b.addRunArtifact(caves_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_physics_collision_tests.step);
+    test_step.dependOn(&run_caves_tests.step);
 }
