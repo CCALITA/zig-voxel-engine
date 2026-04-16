@@ -45,7 +45,7 @@ const face_vertices = [6][4][3]u1{
 };
 
 // Face normal directions for neighbor checking.
-const face_normals = [6][3]i32{
+pub const face_normals = [6][3]i32{
     .{ 0, 0, -1 }, // North
     .{ 0, 0, 1 }, // South
     .{ 1, 0, 0 }, // East
@@ -55,9 +55,9 @@ const face_normals = [6][3]i32{
 };
 
 // Two triangles per quad: indices into the 4 corners (0,1,2 and 2,3,0).
-const quad_indices = [6]u2{ 0, 1, 2, 2, 3, 0 };
+pub const quad_indices = [6]u2{ 0, 1, 2, 2, 3, 0 };
 
-fn isNeighborSolid(chunk: *const Chunk, neighbors: NeighborChunks, nx: i32, ny: i32, nz: i32) bool {
+pub fn isNeighborSolid(chunk: *const Chunk, neighbors: NeighborChunks, nx: i32, ny: i32, nz: i32) bool {
     const size: i32 = Chunk.SIZE;
     // Within this chunk
     if (nx >= 0 and nx < size and ny >= 0 and ny < size and nz >= 0 and nz < size) {
