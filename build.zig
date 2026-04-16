@@ -20,6 +20,19 @@ pub fn build(b: *std.Build) void {
     const zglfw_dep = b.dependency("zglfw", .{});
     const zglfw_mod = zglfw_dep.module("root");
 
+    // --- World modules (shared between engine and physics) ---
+    const block_mod = b.addModule("block", .{
+        .root_source_file = b.path("src/world/block.zig"),
+        .target = target,
+    });
+    const chunk_mod = b.addModule("chunk", .{
+        .root_source_file = b.path("src/world/chunk.zig"),
+        .target = target,
+        .imports = &.{
+            .{ .name = "block.zig", .module = block_mod },
+        },
+    });
+
     // --- Engine library module ---
     const engine_mod = b.addModule("engine", .{
         .root_source_file = b.path("src/engine.zig"),
@@ -70,7 +83,22 @@ pub fn build(b: *std.Build) void {
     });
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
+    // Physics collision tests — wire world modules via named imports.
+    const physics_collision_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/physics/collision.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "block", .module = block_mod },
+                .{ .name = "chunk", .module = chunk_mod },
+            },
+        }),
+    });
+    const run_physics_collision_tests = b.addRunArtifact(physics_collision_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_physics_collision_tests.step);
 }
