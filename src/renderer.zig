@@ -1,6 +1,8 @@
 const std = @import("std");
 const vk = @import("vulkan");
 const zglfw = @import("zglfw");
+const pipeline_mod = @import("pipeline.zig");
+const mesh = @import("world/mesh.zig");
 
 const Self = @This();
 
@@ -56,6 +58,18 @@ current_frame: u32 = 0,
 graphics_family: u32,
 present_family: u32,
 
+// Graphics pipeline
+terrain_pipeline: vk.Pipeline,
+terrain_pipeline_layout: vk.PipelineLayout,
+
+// Vertex buffer for chunk mesh
+vertex_buffer: vk.Buffer,
+vertex_buffer_memory: vk.DeviceMemory,
+vertex_count: u32,
+
+// Current MVP matrix (set each frame)
+current_mvp: [4][4]f32,
+
 pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     var self: Self = undefined;
     self.allocator = allocator;
@@ -108,6 +122,26 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     // Create sync objects
     try self.createSyncObjects();
 
+    // Create terrain graphics pipeline
+    const vert_spv: []align(4) const u8 = @alignCast(@embedFile("shaders/terrain.vert.spv"));
+    const frag_spv: []align(4) const u8 = @alignCast(@embedFile("shaders/terrain.frag.spv"));
+
+    const pl = try pipeline_mod.create(
+        self.device,
+        self.vkd,
+        self.render_pass,
+        vert_spv,
+        frag_spv,
+    );
+    self.terrain_pipeline = pl.pipeline;
+    self.terrain_pipeline_layout = pl.layout;
+
+    // Initialize vertex buffer as null (will be set by uploadChunkMesh)
+    self.vertex_buffer = .null_handle;
+    self.vertex_buffer_memory = .null_handle;
+    self.vertex_count = 0;
+    self.current_mvp = std.mem.zeroes([4][4]f32);
+
     return self;
 }
 
@@ -116,6 +150,12 @@ pub fn deinit(self: *Self) void {
     self.destroySyncObjects();
     self.vkd.destroyCommandPool(self.device, self.command_pool, null);
     self.destroyFramebuffers();
+    if (self.vertex_buffer != .null_handle) {
+        self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
+        self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
+    }
+    self.vkd.destroyPipeline(self.device, self.terrain_pipeline, null);
+    self.vkd.destroyPipelineLayout(self.device, self.terrain_pipeline_layout, null);
     self.vkd.destroyRenderPass(self.device, self.render_pass, null);
     self.destroySwapchain();
     self.vki.destroySurfaceKHR(self.instance, self.surface, null);
@@ -123,7 +163,8 @@ pub fn deinit(self: *Self) void {
     self.vki.destroyInstance(self.instance, null);
 }
 
-pub fn drawFrame(self: *Self) !void {
+pub fn drawFrame(self: *Self, mvp: [4][4]f32) !void {
+    self.current_mvp = mvp;
     const frame = self.current_frame;
 
     // Wait for previous frame's fence
@@ -554,7 +595,45 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
         .p_clear_values = @ptrCast(&clear_color),
     }, .@"inline");
 
-    // No draw calls yet -- just clear to sky blue
+    // Bind terrain pipeline and draw chunk mesh
+    if (self.vertex_buffer != .null_handle and self.vertex_count > 0) {
+        self.vkd.cmdBindPipeline(cmd, .graphics, self.terrain_pipeline);
+
+        // Dynamic viewport
+        self.vkd.cmdSetViewport(cmd, 0, 1, &.{vk.Viewport{
+            .x = 0.0,
+            .y = 0.0,
+            .width = @floatFromInt(self.swapchain_extent.width),
+            .height = @floatFromInt(self.swapchain_extent.height),
+            .min_depth = 0.0,
+            .max_depth = 1.0,
+        }});
+
+        // Dynamic scissor
+        self.vkd.cmdSetScissor(cmd, 0, 1, &.{vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = self.swapchain_extent,
+        }});
+
+        // Bind vertex buffer
+        const offsets = [_]vk.DeviceSize{0};
+        const buffers = [_]vk.Buffer{self.vertex_buffer};
+        self.vkd.cmdBindVertexBuffers(cmd, 0, 1, &buffers, &offsets);
+
+        // Push MVP matrix
+        const push = pipeline_mod.PushConstants{ .mvp = self.current_mvp };
+        self.vkd.cmdPushConstants(
+            cmd,
+            self.terrain_pipeline_layout,
+            .{ .vertex_bit = true },
+            0,
+            @sizeOf(pipeline_mod.PushConstants),
+            @ptrCast(&push),
+        );
+
+        // Draw
+        self.vkd.cmdDraw(cmd, self.vertex_count, 1, 0, 0);
+    }
 
     self.vkd.cmdEndRenderPass(cmd);
 
@@ -567,6 +646,70 @@ fn recreateSwapchain(self: *Self) !void {
     self.destroySwapchain();
     try self.createSwapchain();
     try self.createFramebuffers();
+}
+
+pub fn uploadChunkMesh(self: *Self, vertices: []const mesh.Vertex) !void {
+    // Clean up previous buffer if exists
+    if (self.vertex_buffer != .null_handle) {
+        self.waitIdle();
+        self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
+        self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
+    }
+
+    self.vertex_count = @intCast(vertices.len);
+    if (vertices.len == 0) {
+        self.vertex_buffer = .null_handle;
+        self.vertex_buffer_memory = .null_handle;
+        return;
+    }
+
+    const buffer_size: vk.DeviceSize = @intCast(vertices.len * @sizeOf(mesh.Vertex));
+
+    // Create vertex buffer (host-visible for simplicity)
+    self.vertex_buffer = try self.vkd.createBuffer(self.device, &.{
+        .size = buffer_size,
+        .usage = .{ .vertex_buffer_bit = true },
+        .sharing_mode = .exclusive,
+    }, null);
+
+    // Get memory requirements
+    const mem_reqs = self.vkd.getBufferMemoryRequirements(self.device, self.vertex_buffer);
+
+    // Allocate memory (host-visible + host-coherent)
+    const mem_type = try self.findMemoryType(mem_reqs.memory_type_bits, .{
+        .host_visible_bit = true,
+        .host_coherent_bit = true,
+    });
+
+    self.vertex_buffer_memory = try self.vkd.allocateMemory(self.device, &.{
+        .allocation_size = mem_reqs.size,
+        .memory_type_index = mem_type,
+    }, null);
+
+    // Bind buffer to memory
+    try self.vkd.bindBufferMemory(self.device, self.vertex_buffer, self.vertex_buffer_memory, 0);
+
+    // Map, copy, unmap
+    const data_ptr = try self.vkd.mapMemory(self.device, self.vertex_buffer_memory, 0, buffer_size, .{});
+    const dst: [*]mesh.Vertex = @ptrCast(@alignCast(data_ptr));
+    @memcpy(dst[0..vertices.len], vertices);
+    self.vkd.unmapMemory(self.device, self.vertex_buffer_memory);
+}
+
+fn findMemoryType(self: *Self, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
+    const mem_properties = self.vki.getPhysicalDeviceMemoryProperties(self.physical_device);
+
+    for (0..mem_properties.memory_type_count) |i| {
+        const idx: u5 = @intCast(i);
+        if ((type_filter & (@as(u32, 1) << idx)) != 0) {
+            const flags = mem_properties.memory_types[i].property_flags;
+            if ((@as(u32, @bitCast(flags)) & @as(u32, @bitCast(properties))) == @as(u32, @bitCast(properties))) {
+                return @intCast(i);
+            }
+        }
+    }
+
+    return error.NoSuitableMemoryType;
 }
 
 // --- Swapchain choice helpers ---
