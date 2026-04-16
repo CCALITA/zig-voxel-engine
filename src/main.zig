@@ -1,11 +1,19 @@
 const std = @import("std");
-const engine = @import("engine");
+const Engine = @import("engine").Engine;
 
 pub fn main() !void {
-    std.debug.print("zig-voxel-engine v0.1.0\n", .{});
-    std.debug.print("Subsystems: {d}\n", .{engine.subsystem_count});
-}
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-test "engine module is importable" {
-    try std.testing.expectEqual(@as(u32, 0), engine.subsystem_count);
+    std.debug.print("zig-voxel-engine v0.1.0\n", .{});
+
+    var engine = try Engine.init(allocator);
+    defer engine.deinit();
+
+    std.debug.print("Vulkan initialized. Running...\n", .{});
+
+    engine.run();
+
+    std.debug.print("Shutdown complete.\n", .{});
 }

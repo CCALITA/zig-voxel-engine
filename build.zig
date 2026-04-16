@@ -4,13 +4,35 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Core engine library module
+    // --- Dependencies ---
+
+    // Vulkan bindings (generated from vk.xml at build time)
+    const vk_dep = b.dependency("vulkan", .{
+        .registry = b.path("deps/vk.xml"),
+    });
+    const vk_mod = vk_dep.module("vulkan-zig");
+
+    // Math library
+    const zmath_dep = b.dependency("zmath", .{});
+    const zmath_mod = zmath_dep.module("root");
+
+    // GLFW windowing
+    const zglfw_dep = b.dependency("zglfw", .{});
+    const zglfw_mod = zglfw_dep.module("root");
+
+    // --- Engine library module ---
     const engine_mod = b.addModule("engine", .{
         .root_source_file = b.path("src/engine.zig"),
         .target = target,
+        .imports = &.{
+            .{ .name = "vulkan", .module = vk_mod },
+            .{ .name = "zmath", .module = zmath_mod },
+            .{ .name = "zglfw", .module = zglfw_mod },
+        },
     });
+    engine_mod.linkLibrary(zglfw_dep.artifact("glfw"));
 
-    // Main executable
+    // --- Main executable ---
     const exe = b.addExecutable(.{
         .name = "zig-voxel-engine",
         .root_module = b.createModule(.{
@@ -19,9 +41,12 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "engine", .module = engine_mod },
+                .{ .name = "vulkan", .module = vk_mod },
+                .{ .name = "zglfw", .module = zglfw_mod },
             },
         }),
     });
+    exe.root_module.linkLibrary(zglfw_dep.artifact("glfw"));
 
     b.installArtifact(exe);
 
