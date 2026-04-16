@@ -57,7 +57,45 @@ const face_normals = [6][3]i32{
 // Two triangles per quad: indices into the 4 corners (0,1,2 and 2,3,0).
 const quad_indices = [6]u2{ 0, 1, 2, 2, 3, 0 };
 
+fn isNeighborSolid(chunk: *const Chunk, neighbors: NeighborChunks, nx: i32, ny: i32, nz: i32) bool {
+    const size: i32 = Chunk.SIZE;
+    // Within this chunk
+    if (nx >= 0 and nx < size and ny >= 0 and ny < size and nz >= 0 and nz < size) {
+        return chunk.isNeighborSolid(nx, ny, nz);
+    }
+    // Check neighbor chunks
+    const neighbor_chunk: ?*const Chunk = if (nx < 0) neighbors.west
+        else if (nx >= size) neighbors.east
+        else if (ny < 0) neighbors.bottom
+        else if (ny >= size) neighbors.top
+        else if (nz < 0) neighbors.north
+        else if (nz >= size) neighbors.south
+        else null;
+
+    if (neighbor_chunk) |nc| {
+        const lx: u4 = @intCast(@mod(nx, size));
+        const ly: u4 = @intCast(@mod(ny, size));
+        const lz: u4 = @intCast(@mod(nz, size));
+        return block.isSolid(nc.getBlock(lx, ly, lz));
+    }
+    // No neighbor chunk loaded — treat as air (emit the face)
+    return false;
+}
+
+pub const NeighborChunks = struct {
+    north: ?*const Chunk = null, // -Z
+    south: ?*const Chunk = null, // +Z
+    east: ?*const Chunk = null, // +X
+    west: ?*const Chunk = null, // -X
+    top: ?*const Chunk = null, // +Y
+    bottom: ?*const Chunk = null, // -Y
+};
+
 pub fn generateMesh(allocator: std.mem.Allocator, chunk: *const Chunk) !IndexedMeshData {
+    return generateMeshWithNeighbors(allocator, chunk, .{});
+}
+
+pub fn generateMeshWithNeighbors(allocator: std.mem.Allocator, chunk: *const Chunk, neighbors: NeighborChunks) !IndexedMeshData {
     var vertices: std.ArrayList(Vertex) = .empty;
     errdefer vertices.deinit(allocator);
 
@@ -81,7 +119,7 @@ pub fn generateMesh(allocator: std.mem.Allocator, chunk: *const Chunk) !IndexedM
                     const ny = @as(i32, by) + face_normals[face_idx][1];
                     const nz = @as(i32, bz) + face_normals[face_idx][2];
 
-                    if (chunk.isNeighborSolid(nx, ny, nz)) continue;
+                    if (isNeighborSolid(chunk, neighbors, nx, ny, nz)) continue;
 
                     const tex = def.tex[face_idx];
                     const corners = face_vertices[face_idx];

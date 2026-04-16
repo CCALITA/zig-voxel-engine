@@ -14,9 +14,9 @@ const Self = @This();
 
 pub fn init(aspect: f32) Self {
     return .{
-        .pos = zm.f32x4(8.0, 20.0, 25.0, 1.0),
+        .pos = zm.f32x4(8.0, 12.0, 8.0, 1.0),
         .yaw = 0.0,
-        .pitch = -0.4,
+        .pitch = 0.0,
         .fov = 70.0,
         .aspect = aspect,
     };
@@ -37,7 +37,7 @@ pub fn right(self: *const Self) zm.Vec {
 }
 
 pub fn processMouseDelta(self: *Self, dx: f64, dy: f64) void {
-    self.yaw += @floatCast(dx * self.sensitivity);
+    self.yaw -= @floatCast(dx * self.sensitivity);
     self.pitch -= @floatCast(dy * self.sensitivity);
 
     const max_pitch = std.math.degreesToRadians(89.0);
@@ -61,12 +61,15 @@ pub fn viewMatrix(self: *const Self) zm.Mat {
 }
 
 pub fn projectionMatrix(self: *const Self) zm.Mat {
-    return zm.perspectiveFovRh(
+    var proj = zm.perspectiveFovRh(
         std.math.degreesToRadians(self.fov),
         self.aspect,
         0.1,
         1000.0,
     );
+    // Vulkan clip space has Y pointing down; negate Y to flip
+    proj[1] = -proj[1];
+    return proj;
 }
 
 pub fn vpMatrix(self: *const Self) zm.Mat {

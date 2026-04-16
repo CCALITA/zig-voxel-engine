@@ -732,8 +732,8 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
                 @floatFromInt(chunk_data.world_z),
             );
 
-            // MVP = VP * model
-            const mvp = mat4Mul(self.current_vp, model);
+            // MVP = model * VP (row-vector convention: v * model * VP)
+            const mvp = mat4Mul(model, self.current_vp);
             const push = pipeline_mod.PushConstants{ .mvp = mvp };
             self.vkd.cmdPushConstants(
                 cmd,

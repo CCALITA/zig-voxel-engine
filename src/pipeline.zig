@@ -83,7 +83,7 @@ pub fn create(
         .polygon_mode = .fill,
         .line_width = 1.0,
         .cull_mode = .{ .back_bit = true },
-        .front_face = .counter_clockwise,
+        .front_face = .clockwise,
         .depth_bias_enable = vk.Bool32.false,
         .depth_bias_constant_factor = 0.0,
         .depth_bias_clamp = 0.0,

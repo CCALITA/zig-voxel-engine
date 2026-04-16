@@ -11,8 +11,8 @@ const noise = @import("noise.zig");
 // ---------------------------------------------------------------------------
 
 const BASE_HEIGHT: f64 = 9.0; // midpoint of terrain height
-const HEIGHT_VARIATION: f64 = 4.0; // +/- blocks around base
-const NOISE_SCALE: f64 = 0.05; // world-space -> noise-space
+const HEIGHT_VARIATION: f64 = 2.0; // +/- blocks around base
+const NOISE_SCALE: f64 = 0.008; // world-space -> noise-space (lower = smoother hills)
 const SAND_THRESHOLD: u4 = 7; // heights at or below this get sand on top
 const FBM_OCTAVES: u32 = 4;
 const FBM_LACUNARITY: f64 = 2.0;
