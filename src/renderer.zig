@@ -2,7 +2,7 @@ const std = @import("std");
 const vk = @import("vulkan");
 const zglfw = @import("zglfw");
 const pipeline_mod = @import("pipeline.zig");
-const mesh = @import("world/mesh.zig");
+const mesh_indexed = @import("world/mesh_indexed.zig");
 
 const Self = @This();
 
@@ -66,6 +66,11 @@ terrain_pipeline_layout: vk.PipelineLayout,
 vertex_buffer: vk.Buffer,
 vertex_buffer_memory: vk.DeviceMemory,
 vertex_count: u32,
+
+// Index buffer for indexed drawing
+index_buffer: vk.Buffer,
+index_buffer_memory: vk.DeviceMemory,
+index_count: u32,
 
 // Depth buffer
 depth_image: vk.Image,
@@ -148,6 +153,12 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     self.vertex_buffer = .null_handle;
     self.vertex_buffer_memory = .null_handle;
     self.vertex_count = 0;
+
+    // Initialize index buffer as null (will be set by uploadChunkMesh)
+    self.index_buffer = .null_handle;
+    self.index_buffer_memory = .null_handle;
+    self.index_count = 0;
+
     self.current_mvp = std.mem.zeroes([4][4]f32);
 
     return self;
@@ -161,6 +172,10 @@ pub fn deinit(self: *Self) void {
     if (self.vertex_buffer != .null_handle) {
         self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
         self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
+    }
+    if (self.index_buffer != .null_handle) {
+        self.vkd.destroyBuffer(self.device, self.index_buffer, null);
+        self.vkd.freeMemory(self.device, self.index_buffer_memory, null);
     }
     self.vkd.destroyPipeline(self.device, self.terrain_pipeline, null);
     self.vkd.destroyPipelineLayout(self.device, self.terrain_pipeline_layout, null);
@@ -691,8 +706,8 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
         .p_clear_values = &clear_values,
     }, .@"inline");
 
-    // Bind terrain pipeline and draw chunk mesh
-    if (self.vertex_buffer != .null_handle and self.vertex_count > 0) {
+    // Bind terrain pipeline and draw chunk mesh (indexed)
+    if (self.vertex_buffer != .null_handle and self.index_buffer != .null_handle and self.index_count > 0) {
         self.vkd.cmdBindPipeline(cmd, .graphics, self.terrain_pipeline);
 
         // Dynamic viewport
@@ -716,6 +731,9 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
         const buffers = [_]vk.Buffer{self.vertex_buffer};
         self.vkd.cmdBindVertexBuffers(cmd, 0, 1, &buffers, &offsets);
 
+        // Bind index buffer
+        self.vkd.cmdBindIndexBuffer(cmd, self.index_buffer, 0, .uint32);
+
         // Push MVP matrix
         const push = pipeline_mod.PushConstants{ .mvp = self.current_mvp };
         self.vkd.cmdPushConstants(
@@ -727,8 +745,8 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
             @ptrCast(&push),
         );
 
-        // Draw
-        self.vkd.cmdDraw(cmd, self.vertex_count, 1, 0, 0);
+        // Draw indexed
+        self.vkd.cmdDrawIndexed(cmd, self.index_count, 1, 0, 0, 0);
     }
 
     self.vkd.cmdEndRenderPass(cmd);
@@ -746,52 +764,96 @@ fn recreateSwapchain(self: *Self) !void {
     try self.createFramebuffers();
 }
 
-pub fn uploadChunkMesh(self: *Self, vertices: []const mesh.Vertex) !void {
-    // Clean up previous buffer if exists
-    if (self.vertex_buffer != .null_handle) {
+pub fn uploadChunkMesh(self: *Self, vertices: []const mesh_indexed.Vertex, indices: []const u32) !void {
+    // Clean up previous buffers if they exist
+    if (self.vertex_buffer != .null_handle or self.index_buffer != .null_handle) {
         self.waitIdle();
-        self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
-        self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
+        if (self.vertex_buffer != .null_handle) {
+            self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
+            self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
+        }
+        if (self.index_buffer != .null_handle) {
+            self.vkd.destroyBuffer(self.device, self.index_buffer, null);
+            self.vkd.freeMemory(self.device, self.index_buffer_memory, null);
+        }
     }
 
     self.vertex_count = @intCast(vertices.len);
-    if (vertices.len == 0) {
+    self.index_count = @intCast(indices.len);
+    if (vertices.len == 0 or indices.len == 0) {
         self.vertex_buffer = .null_handle;
         self.vertex_buffer_memory = .null_handle;
+        self.index_buffer = .null_handle;
+        self.index_buffer_memory = .null_handle;
+        self.vertex_count = 0;
+        self.index_count = 0;
         return;
     }
 
-    const buffer_size: vk.DeviceSize = @intCast(vertices.len * @sizeOf(mesh.Vertex));
+    // Create vertex buffer
+    const vb = try self.createHostBuffer(
+        .{ .vertex_buffer_bit = true },
+        @intCast(vertices.len * @sizeOf(mesh_indexed.Vertex)),
+    );
+    self.vertex_buffer = vb.buffer;
+    self.vertex_buffer_memory = vb.memory;
 
-    // Create vertex buffer (host-visible for simplicity)
-    self.vertex_buffer = try self.vkd.createBuffer(self.device, &.{
-        .size = buffer_size,
-        .usage = .{ .vertex_buffer_bit = true },
+    // If index buffer creation fails, clean up vertex buffer
+    errdefer {
+        self.vkd.destroyBuffer(self.device, self.vertex_buffer, null);
+        self.vkd.freeMemory(self.device, self.vertex_buffer_memory, null);
+        self.vertex_buffer = .null_handle;
+        self.vertex_buffer_memory = .null_handle;
+    }
+
+    const vb_data_ptr = try self.vkd.mapMemory(self.device, self.vertex_buffer_memory, 0, vb.size, .{});
+    const vb_dst: [*]mesh_indexed.Vertex = @ptrCast(@alignCast(vb_data_ptr));
+    @memcpy(vb_dst[0..vertices.len], vertices);
+    self.vkd.unmapMemory(self.device, self.vertex_buffer_memory);
+
+    // Create index buffer
+    const ib = try self.createHostBuffer(
+        .{ .index_buffer_bit = true },
+        @intCast(indices.len * @sizeOf(u32)),
+    );
+    self.index_buffer = ib.buffer;
+    self.index_buffer_memory = ib.memory;
+
+    const ib_data_ptr = try self.vkd.mapMemory(self.device, self.index_buffer_memory, 0, ib.size, .{});
+    const ib_dst: [*]u32 = @ptrCast(@alignCast(ib_data_ptr));
+    @memcpy(ib_dst[0..indices.len], indices);
+    self.vkd.unmapMemory(self.device, self.index_buffer_memory);
+}
+
+const HostBuffer = struct {
+    buffer: vk.Buffer,
+    memory: vk.DeviceMemory,
+    size: vk.DeviceSize,
+};
+
+fn createHostBuffer(self: *Self, usage: vk.BufferUsageFlags, size: vk.DeviceSize) !HostBuffer {
+    const buffer = try self.vkd.createBuffer(self.device, &.{
+        .size = size,
+        .usage = usage,
         .sharing_mode = .exclusive,
     }, null);
+    errdefer self.vkd.destroyBuffer(self.device, buffer, null);
 
-    // Get memory requirements
-    const mem_reqs = self.vkd.getBufferMemoryRequirements(self.device, self.vertex_buffer);
-
-    // Allocate memory (host-visible + host-coherent)
+    const mem_reqs = self.vkd.getBufferMemoryRequirements(self.device, buffer);
     const mem_type = try self.findMemoryType(mem_reqs.memory_type_bits, .{
         .host_visible_bit = true,
         .host_coherent_bit = true,
     });
 
-    self.vertex_buffer_memory = try self.vkd.allocateMemory(self.device, &.{
+    const memory = try self.vkd.allocateMemory(self.device, &.{
         .allocation_size = mem_reqs.size,
         .memory_type_index = mem_type,
     }, null);
+    errdefer self.vkd.freeMemory(self.device, memory, null);
 
-    // Bind buffer to memory
-    try self.vkd.bindBufferMemory(self.device, self.vertex_buffer, self.vertex_buffer_memory, 0);
+    try self.vkd.bindBufferMemory(self.device, buffer, memory, 0);
 
-    // Map, copy, unmap
-    const data_ptr = try self.vkd.mapMemory(self.device, self.vertex_buffer_memory, 0, buffer_size, .{});
-    const dst: [*]mesh.Vertex = @ptrCast(@alignCast(data_ptr));
-    @memcpy(dst[0..vertices.len], vertices);
-    self.vkd.unmapMemory(self.device, self.vertex_buffer_memory);
+    return .{ .buffer = buffer, .memory = memory, .size = size };
 }
 
 fn findMemoryType(self: *Self, type_filter: u32, properties: vk.MemoryPropertyFlags) !u32 {
