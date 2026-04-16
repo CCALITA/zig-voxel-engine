@@ -34,46 +34,58 @@ pub const Engine = struct {
 
         var renderer = try Renderer.init(allocator, window.handle);
 
-        // Generate a test chunk (flat grass layer)
-        var chunk = Chunk.init();
-        for (0..Chunk.SIZE) |xi| {
-            for (0..Chunk.SIZE) |zi| {
-                // Bedrock at y=0
-                chunk.setBlock(@intCast(xi), 0, @intCast(zi), block.BEDROCK);
-                // Stone layers y=1..5
-                for (1..6) |yi| {
-                    chunk.setBlock(@intCast(xi), @intCast(yi), @intCast(zi), block.STONE);
-                }
-                // Dirt y=6..8
-                for (6..9) |yi| {
-                    chunk.setBlock(@intCast(xi), @intCast(yi), @intCast(zi), block.DIRT);
-                }
-                // Grass on top y=9
-                chunk.setBlock(@intCast(xi), 9, @intCast(zi), block.GRASS);
-            }
-        }
-        // A tree at (8, 10, 8)
-        for (10..14) |yi| {
-            chunk.setBlock(8, @intCast(yi), 8, block.OAK_LOG);
-        }
-        // Leaves canopy
-        for (12..15) |yi| {
-            for (6..11) |xi| {
-                for (6..11) |zi| {
-                    const bx: u4 = @intCast(xi);
-                    const by: u4 = @intCast(yi);
-                    const bz: u4 = @intCast(zi);
-                    if (chunk.getBlock(bx, by, bz) == block.AIR) {
-                        chunk.setBlock(bx, by, bz, block.OAK_LEAVES);
+        // Generate a 3x3 grid of chunks around the origin
+        const grid_radius = 1; // -1..1 => 3x3
+        var cx: i32 = -grid_radius;
+        while (cx <= grid_radius) : (cx += 1) {
+            var cz: i32 = -grid_radius;
+            while (cz <= grid_radius) : (cz += 1) {
+                var chunk = Chunk.init();
+                for (0..Chunk.SIZE) |xi| {
+                    for (0..Chunk.SIZE) |zi| {
+                        // Bedrock at y=0
+                        chunk.setBlock(@intCast(xi), 0, @intCast(zi), block.BEDROCK);
+                        // Stone layers y=1..5
+                        for (1..6) |yi| {
+                            chunk.setBlock(@intCast(xi), @intCast(yi), @intCast(zi), block.STONE);
+                        }
+                        // Dirt y=6..8
+                        for (6..9) |yi| {
+                            chunk.setBlock(@intCast(xi), @intCast(yi), @intCast(zi), block.DIRT);
+                        }
+                        // Grass on top y=9
+                        chunk.setBlock(@intCast(xi), 9, @intCast(zi), block.GRASS);
                     }
                 }
+
+                // Place a tree at (8, 10, 8) only in the center chunk
+                if (cx == 0 and cz == 0) {
+                    for (10..14) |yi| {
+                        chunk.setBlock(8, @intCast(yi), 8, block.OAK_LOG);
+                    }
+                    // Leaves canopy
+                    for (12..15) |yi| {
+                        for (6..11) |xi| {
+                            for (6..11) |zi| {
+                                const bx: u4 = @intCast(xi);
+                                const by: u4 = @intCast(yi);
+                                const bz: u4 = @intCast(zi);
+                                if (chunk.getBlock(bx, by, bz) == block.AIR) {
+                                    chunk.setBlock(bx, by, bz, block.OAK_LEAVES);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                var mesh_data = try mesh.generateMesh(allocator, &chunk);
+                defer mesh_data.deinit();
+
+                const world_x = cx * @as(i32, Chunk.SIZE);
+                const world_z = cz * @as(i32, Chunk.SIZE);
+                try renderer.uploadChunk(mesh_data.vertices, world_x, 0, world_z);
             }
         }
-
-        var mesh_data = try mesh.generateMesh(allocator, &chunk);
-        defer mesh_data.deinit();
-
-        try renderer.uploadChunkMesh(mesh_data.vertices);
 
         const aspect = 1280.0 / 720.0;
 
