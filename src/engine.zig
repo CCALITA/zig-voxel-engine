@@ -8,6 +8,7 @@ pub const Camera = @import("camera.zig");
 pub const pipeline = @import("pipeline.zig");
 pub const block = @import("world/block.zig");
 pub const Chunk = @import("world/chunk.zig");
+pub const mesh_indexed = @import("world/mesh_indexed.zig");
 pub const mesh = @import("world/mesh.zig");
 
 pub const subsystem_count: u32 = 3; // window + renderer + camera
@@ -70,10 +71,10 @@ pub const Engine = struct {
             }
         }
 
-        var mesh_data = try mesh.generateMesh(allocator, &chunk);
+        var mesh_data = try mesh_indexed.generateMesh(allocator, &chunk);
         defer mesh_data.deinit();
 
-        try renderer.uploadChunkMesh(mesh_data.vertices);
+        try renderer.uploadChunkMesh(mesh_data.vertices, mesh_data.indices);
 
         const aspect = 1280.0 / 720.0;
 
@@ -162,4 +163,8 @@ test "chunk module" {
 
 test "mesh module" {
     _ = mesh;
+}
+
+test "mesh_indexed module" {
+    _ = mesh_indexed;
 }
