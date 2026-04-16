@@ -67,6 +67,11 @@ vertex_buffer: vk.Buffer,
 vertex_buffer_memory: vk.DeviceMemory,
 vertex_count: u32,
 
+// Depth buffer
+depth_image: vk.Image,
+depth_image_view: vk.ImageView,
+depth_image_memory: vk.DeviceMemory,
+
 // Current MVP matrix (set each frame)
 current_mvp: [4][4]f32,
 
@@ -109,6 +114,9 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
 
     // Create swapchain
     try self.createSwapchain();
+
+    // Create depth buffer resources
+    try self.createDepthResources();
 
     // Create render pass
     self.render_pass = try self.createRenderPass();
@@ -157,6 +165,7 @@ pub fn deinit(self: *Self) void {
     self.vkd.destroyPipeline(self.device, self.terrain_pipeline, null);
     self.vkd.destroyPipelineLayout(self.device, self.terrain_pipeline_layout, null);
     self.vkd.destroyRenderPass(self.device, self.render_pass, null);
+    self.destroyDepthResources();
     self.destroySwapchain();
     self.vki.destroySurfaceKHR(self.instance, self.surface, null);
     self.vkd.destroyDevice(self.device, null);
@@ -488,47 +497,133 @@ fn destroySwapchain(self: *Self) void {
     self.vkd.destroySwapchainKHR(self.device, self.swapchain, null);
 }
 
+fn createDepthResources(self: *Self) !void {
+    self.depth_image = try self.vkd.createImage(self.device, &vk.ImageCreateInfo{
+        .image_type = .@"2d",
+        .format = .d32_sfloat,
+        .extent = .{
+            .width = self.swapchain_extent.width,
+            .height = self.swapchain_extent.height,
+            .depth = 1,
+        },
+        .mip_levels = 1,
+        .array_layers = 1,
+        .samples = .{ .@"1_bit" = true },
+        .tiling = .optimal,
+        .usage = .{ .depth_stencil_attachment_bit = true },
+        .sharing_mode = .exclusive,
+        .queue_family_index_count = 0,
+        .p_queue_family_indices = undefined,
+        .initial_layout = .undefined,
+    }, null);
+
+    const mem_reqs = self.vkd.getImageMemoryRequirements(self.device, self.depth_image);
+    const mem_type = try self.findMemoryType(mem_reqs.memory_type_bits, .{
+        .device_local_bit = true,
+    });
+
+    self.depth_image_memory = try self.vkd.allocateMemory(self.device, &.{
+        .allocation_size = mem_reqs.size,
+        .memory_type_index = mem_type,
+    }, null);
+
+    try self.vkd.bindImageMemory(self.device, self.depth_image, self.depth_image_memory, 0);
+
+    self.depth_image_view = try self.vkd.createImageView(self.device, &.{
+        .image = self.depth_image,
+        .view_type = .@"2d",
+        .format = .d32_sfloat,
+        .components = .{
+            .r = .identity,
+            .g = .identity,
+            .b = .identity,
+            .a = .identity,
+        },
+        .subresource_range = .{
+            .aspect_mask = .{ .depth_bit = true },
+            .base_mip_level = 0,
+            .level_count = 1,
+            .base_array_layer = 0,
+            .layer_count = 1,
+        },
+    }, null);
+}
+
+fn destroyDepthResources(self: *Self) void {
+    self.vkd.destroyImageView(self.device, self.depth_image_view, null);
+    self.vkd.freeMemory(self.device, self.depth_image_memory, null);
+    self.vkd.destroyImage(self.device, self.depth_image, null);
+}
+
 fn createRenderPass(self: *Self) !vk.RenderPass {
+    const color_attachment = vk.AttachmentDescription{
+        .format = self.swapchain_format,
+        .samples = .{ .@"1_bit" = true },
+        .load_op = .clear,
+        .store_op = .store,
+        .stencil_load_op = .dont_care,
+        .stencil_store_op = .dont_care,
+        .initial_layout = .undefined,
+        .final_layout = .present_src_khr,
+    };
+
+    const depth_attachment = vk.AttachmentDescription{
+        .format = .d32_sfloat,
+        .samples = .{ .@"1_bit" = true },
+        .load_op = .clear,
+        .store_op = .dont_care,
+        .stencil_load_op = .dont_care,
+        .stencil_store_op = .dont_care,
+        .initial_layout = .undefined,
+        .final_layout = .depth_stencil_attachment_optimal,
+    };
+
+    const attachments = [_]vk.AttachmentDescription{ color_attachment, depth_attachment };
+
+    const color_ref = vk.AttachmentReference{
+        .attachment = 0,
+        .layout = .color_attachment_optimal,
+    };
+
+    const depth_ref = vk.AttachmentReference{
+        .attachment = 1,
+        .layout = .depth_stencil_attachment_optimal,
+    };
+
+    const subpass = vk.SubpassDescription{
+        .pipeline_bind_point = .graphics,
+        .color_attachment_count = 1,
+        .p_color_attachments = &.{color_ref},
+        .p_depth_stencil_attachment = &depth_ref,
+    };
+
+    const dependency = vk.SubpassDependency{
+        .src_subpass = vk.SUBPASS_EXTERNAL,
+        .dst_subpass = 0,
+        .src_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
+        .src_access_mask = .{},
+        .dst_stage_mask = .{ .color_attachment_output_bit = true, .early_fragment_tests_bit = true },
+        .dst_access_mask = .{ .color_attachment_write_bit = true, .depth_stencil_attachment_write_bit = true },
+    };
+
     return self.vkd.createRenderPass(self.device, &.{
-        .attachment_count = 1,
-        .p_attachments = &.{vk.AttachmentDescription{
-            .format = self.swapchain_format,
-            .samples = .{ .@"1_bit" = true },
-            .load_op = .clear,
-            .store_op = .store,
-            .stencil_load_op = .dont_care,
-            .stencil_store_op = .dont_care,
-            .initial_layout = .undefined,
-            .final_layout = .present_src_khr,
-        }},
+        .attachment_count = attachments.len,
+        .p_attachments = &attachments,
         .subpass_count = 1,
-        .p_subpasses = &.{vk.SubpassDescription{
-            .pipeline_bind_point = .graphics,
-            .color_attachment_count = 1,
-            .p_color_attachments = &.{vk.AttachmentReference{
-                .attachment = 0,
-                .layout = .color_attachment_optimal,
-            }},
-        }},
+        .p_subpasses = &.{subpass},
         .dependency_count = 1,
-        .p_dependencies = &.{vk.SubpassDependency{
-            .src_subpass = vk.SUBPASS_EXTERNAL,
-            .dst_subpass = 0,
-            .src_stage_mask = .{ .color_attachment_output_bit = true },
-            .src_access_mask = .{},
-            .dst_stage_mask = .{ .color_attachment_output_bit = true },
-            .dst_access_mask = .{ .color_attachment_write_bit = true },
-        }},
+        .p_dependencies = &.{dependency},
     }, null);
 }
 
 fn createFramebuffers(self: *Self) !void {
     self.framebuffers = try self.allocator.alloc(vk.Framebuffer, self.swapchain_image_views.len);
     for (self.swapchain_image_views, 0..) |view, i| {
+        const attachments = [_]vk.ImageView{ view, self.depth_image_view };
         self.framebuffers[i] = try self.vkd.createFramebuffer(self.device, &.{
             .render_pass = self.render_pass,
-            .attachment_count = 1,
-            .p_attachments = &.{view},
+            .attachment_count = attachments.len,
+            .p_attachments = &attachments,
             .width = self.swapchain_extent.width,
             .height = self.swapchain_extent.height,
             .layers = 1,
@@ -579,9 +674,10 @@ fn destroySyncObjects(self: *Self) void {
 fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !void {
     try self.vkd.beginCommandBuffer(cmd, &.{});
 
-    // Sky blue clear color
-    const clear_color = vk.ClearValue{
-        .color = .{ .float_32 = .{ 0.53, 0.81, 0.92, 1.0 } },
+    // Clear values: color (sky blue) and depth
+    const clear_values = [_]vk.ClearValue{
+        .{ .color = .{ .float_32 = .{ 0.53, 0.81, 0.92, 1.0 } } },
+        .{ .depth_stencil = .{ .depth = 1.0, .stencil = 0 } },
     };
 
     self.vkd.cmdBeginRenderPass(cmd, &.{
@@ -591,8 +687,8 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
             .offset = .{ .x = 0, .y = 0 },
             .extent = self.swapchain_extent,
         },
-        .clear_value_count = 1,
-        .p_clear_values = @ptrCast(&clear_color),
+        .clear_value_count = clear_values.len,
+        .p_clear_values = &clear_values,
     }, .@"inline");
 
     // Bind terrain pipeline and draw chunk mesh
@@ -643,8 +739,10 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
 fn recreateSwapchain(self: *Self) !void {
     self.waitIdle();
     self.destroyFramebuffers();
+    self.destroyDepthResources();
     self.destroySwapchain();
     try self.createSwapchain();
+    try self.createDepthResources();
     try self.createFramebuffers();
 }
 
