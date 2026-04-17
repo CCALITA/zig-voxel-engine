@@ -2,9 +2,9 @@
 /// Called after terrain generation but before tree placement to carve
 /// underground cave networks into solid terrain.
 const std = @import("std");
-const Chunk = @import("chunk");
-const block = @import("block");
-const noise = @import("noise");
+const Chunk = @import("../chunk.zig");
+const block = @import("../block.zig");
+const noise = @import("../noise.zig");
 
 /// Noise frequency — controls the spatial scale of caves.
 /// Lower values produce larger, more open caves; higher values

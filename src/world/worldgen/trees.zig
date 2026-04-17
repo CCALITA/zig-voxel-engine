@@ -3,9 +3,9 @@
 /// generation. Each tree consists of an oak-log trunk (4-6 blocks) topped by a
 /// 5x5x3 leaf canopy with corners removed.
 const std = @import("std");
-const Chunk = @import("chunk");
-const block = @import("block");
-const noise = @import("noise");
+const Chunk = @import("../chunk.zig");
+const block = @import("../block.zig");
+const noise = @import("../noise.zig");
 
 // ---------------------------------------------------------------------------
 // Tree parameters
