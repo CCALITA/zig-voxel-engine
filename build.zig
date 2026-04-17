@@ -251,6 +251,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_scoreboard_tests = b.addRunArtifact(scoreboard_tests);
 
+    // Breeding system tests
+    const breeding_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/breeding.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_breeding_tests = b.addRunArtifact(breeding_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -270,4 +280,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_farming_tests.step);
     test_step.dependOn(&run_tile_entity_tests.step);
     test_step.dependOn(&run_scoreboard_tests.step);
+    test_step.dependOn(&run_breeding_tests.step);
 }
