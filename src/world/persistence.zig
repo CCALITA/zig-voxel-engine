@@ -5,6 +5,7 @@
 const std = @import("std");
 const chunk_serial = @import("chunk_serial.zig");
 const Chunk = @import("chunk.zig");
+const ChunkColumn = @import("chunk_column.zig");
 
 pub const ChunkKey = struct {
     x: i32,
@@ -108,10 +109,89 @@ pub const WorldPersistence = struct {
         return true;
     }
 
+    /// Save all sections of a ChunkColumn to disk. Each non-null section is
+    /// written as a separate `<cx>_<cz>_<section>.dat` file.
+    pub fn saveColumn(self: *WorldPersistence, cx: i32, cz: i32, column: *const ChunkColumn) !void {
+        for (0..ChunkColumn.SECTIONS) |si| {
+            const section_idx: u4 = @intCast(si);
+            if (column.getSection(section_idx)) |section_ptr| {
+                try self.saveSection(cx, cz, section_idx, section_ptr);
+            }
+        }
+        _ = self.dirty_chunks.remove(.{ .x = cx, .z = cz });
+    }
+
+    /// Load a ChunkColumn from disk. Returns null if no section files exist.
+    /// Any missing section is left null (all-air).
+    pub fn loadColumn(self: *WorldPersistence, cx: i32, cz: i32) !?ChunkColumn {
+        var column = ChunkColumn.init();
+        var found_any = false;
+
+        for (0..ChunkColumn.SECTIONS) |si| {
+            const section_idx: u4 = @intCast(si);
+            if (try self.loadSection(cx, cz, section_idx)) |section| {
+                column.sections[si] = section;
+                found_any = true;
+            }
+        }
+
+        if (found_any) return column;
+        return null;
+    }
+
+    /// Save a single section (sub-chunk) to disk.
+    fn saveSection(self: *WorldPersistence, cx: i32, cz: i32, section: u4, chunk: *const Chunk) !void {
+        var buf: [256]u8 = undefined;
+        const path = self.sectionPath(cx, cz, section, &buf);
+        try chunk_serial.saveToFile(self.allocator, chunk, path);
+    }
+
+    /// Load a single section from disk. Returns null if no file exists.
+    fn loadSection(self: *WorldPersistence, cx: i32, cz: i32, section: u4) !?Chunk {
+        var buf: [256]u8 = undefined;
+        const path = self.sectionPath(cx, cz, section, &buf);
+        return chunk_serial.loadFromFile(self.allocator, path) catch |err| switch (err) {
+            error.FileNotFound => return null,
+            else => return err,
+        };
+    }
+
+    /// Save all dirty columns. Iterates dirty keys, saves each column's sections.
+    /// `columns` must support `.getPtr(key)` returning an optional pointer to a ChunkColumn.
+    pub fn saveAllDirtyColumns(self: *WorldPersistence, columns: anytype) !u32 {
+        var saved: u32 = 0;
+
+        var keys = std.ArrayList(ChunkKey).empty;
+        defer keys.deinit(self.allocator);
+
+        var it = self.dirty_chunks.keyIterator();
+        while (it.next()) |key_ptr| {
+            try keys.append(self.allocator, key_ptr.*);
+        }
+
+        for (keys.items) |key| {
+            if (columns.getPtr(.{ .x = key.x, .z = key.z })) |col_ptr| {
+                self.saveColumn(key.x, key.z, col_ptr) catch |err| {
+                    std.debug.print("Failed to save chunk ({d},{d}): {}\n", .{ key.x, key.z, err });
+                    continue;
+                };
+                saved += 1;
+            }
+        }
+
+        return saved;
+    }
+
     /// Build the file path for a chunk into the provided buffer.
     /// Returns: "saves/<world>/chunks/<cx>_<cz>.dat"
     fn chunkPath(self: *const WorldPersistence, cx: i32, cz: i32, buf: []u8) []const u8 {
         return std.fmt.bufPrint(buf, "{s}/{d}_{d}.dat", .{ self.save_dir, cx, cz }) catch unreachable;
+    }
+
+    /// Build the file path for a section into the provided buffer.
+    /// Returns: "saves/<world>/chunks/<cx>_<cz>_<section>.dat"
+    fn sectionPath(self: *const WorldPersistence, cx: i32, cz: i32, section: u4, buf: []u8) []const u8 {
+        return std.fmt.bufPrint(buf, "{s}/{d}_{d}_{d}.dat", .{ self.save_dir, cx, cz, section }) catch unreachable;
     }
 };
 
@@ -204,6 +284,36 @@ test "dirty flag cleared after saveChunk" {
     const chunk = Chunk.init();
     try wp.saveChunk(5, 5, &chunk);
     try std.testing.expectEqual(@as(u32, 0), wp.dirty_chunks.count());
+}
+
+test "column save and load round-trip" {
+    const allocator = std.testing.allocator;
+    var wp = try WorldPersistence.init(allocator, "test_column");
+    defer wp.deinit();
+    defer cleanupTestDir("saves/test_column");
+
+    const blk = @import("block.zig");
+
+    var col = ChunkColumn.init();
+    col.setBlock(3, 5, 7, blk.STONE); // section 0
+    col.setBlock(1, 200, 2, blk.GRASS); // section 12
+
+    try wp.saveColumn(2, -3, &col);
+
+    const loaded = (try wp.loadColumn(2, -3)).?;
+    try std.testing.expectEqual(blk.STONE, loaded.getBlock(3, 5, 7));
+    try std.testing.expectEqual(blk.GRASS, loaded.getBlock(1, 200, 2));
+    try std.testing.expectEqual(blk.AIR, loaded.getBlock(0, 128, 0));
+}
+
+test "loadColumn returns null for non-existent column" {
+    const allocator = std.testing.allocator;
+    var wp = try WorldPersistence.init(allocator, "test_col_null");
+    defer wp.deinit();
+    defer cleanupTestDir("saves/test_col_null");
+
+    const result = try wp.loadColumn(999, 999);
+    try std.testing.expect(result == null);
 }
 
 /// Remove a test directory tree after tests.
