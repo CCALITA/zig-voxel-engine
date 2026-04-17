@@ -23,6 +23,8 @@ pub const mob_mod = @import("entity/mob.zig");
 pub const entity_mod = @import("entity/entity.zig");
 pub const health_mod = @import("gameplay/health.zig");
 pub const water_mod = @import("physics/water.zig");
+pub const crafting_mod = @import("gameplay/crafting.zig");
+pub const furnace_mod = @import("gameplay/furnace.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -69,6 +71,18 @@ pub const Engine = struct {
     // Health and water physics
     player_stats: health_mod.PlayerStats,
     water_state: water_mod.WaterState,
+
+    // Crafting and furnace systems
+    crafting_registry: crafting_mod.CraftingRegistry,
+    active_furnaces: std.ArrayList(FurnaceEntry),
+    last_craft_key: bool,
+
+    const FurnaceEntry = struct {
+        x: i32,
+        y: i32,
+        z: i32,
+        state: furnace_mod.FurnaceState,
+    };
 
     const ChunkKey = struct { x: i32, z: i32 };
 
@@ -144,6 +158,10 @@ pub const Engine = struct {
         // Initialize mob manager and spawn initial mobs
         var mob_manager = mob_mod.MobManager.init(allocator);
 
+        // Initialize crafting registry with default recipes
+        var crafting_registry = crafting_mod.CraftingRegistry.init();
+        try crafting_registry.registerDefaults(allocator);
+
         // Spawn some passive mobs near the player
         const spawn_types = [_]entity_mod.EntityType{ .pig, .cow, .sheep, .chicken };
         for (spawn_types) |mob_type| {
@@ -178,11 +196,16 @@ pub const Engine = struct {
             .mob_manager = mob_manager,
             .player_stats = health_mod.PlayerStats.init(),
             .water_state = water_mod.WaterState.init(),
+            .crafting_registry = crafting_registry,
+            .active_furnaces = .empty,
+            .last_craft_key = false,
         };
     }
 
     pub fn deinit(self: *Engine) void {
         self.mob_manager.deinit();
+        self.crafting_registry.deinit(self.allocator);
+        self.active_furnaces.deinit(self.allocator);
         self.renderer.deinit();
         self.window.deinit();
         self.chunks.deinit();
@@ -260,6 +283,14 @@ pub const Engine = struct {
 
             // Block interaction (left/right mouse click)
             self.handleBlockInteraction();
+
+            // Quick-craft (C key)
+            self.handleQuickCraft();
+
+            // Update all active furnaces
+            for (self.active_furnaces.items) |*entry| {
+                entry.state.update(dt);
+            }
 
             // Horizontal movement based on camera direction
             const fwd = self.camera.forward();
@@ -502,9 +533,135 @@ pub const Engine = struct {
             self.renderer.waitIdle();
             self.breakBlock(hit.bx, hit.by, hit.bz);
         } else if (right_just_pressed) {
-            self.renderer.waitIdle();
-            self.placeBlock(hit.adjacent_x, hit.adjacent_y, hit.adjacent_z);
+            const target_bid = self.getWorldBlock(hit.bx, hit.by, hit.bz) orelse block.AIR;
+            if (target_bid == block.FURNACE) {
+                self.interactFurnace(hit.bx, hit.by, hit.bz);
+            } else {
+                self.renderer.waitIdle();
+                self.placeBlock(hit.adjacent_x, hit.adjacent_y, hit.adjacent_z);
+            }
         }
+    }
+
+    /// Quick-craft: when C is pressed, try to auto-craft the first matching recipe
+    /// from materials in the inventory.
+    fn handleQuickCraft(self: *Engine) void {
+        const c_pressed = self.window.handle.getKey(.c) == .press;
+        const c_just_pressed = c_pressed and !self.last_craft_key;
+        self.last_craft_key = c_pressed;
+
+        if (!c_just_pressed) return;
+
+        for (self.crafting_registry.recipes.items) |recipe| {
+            if (self.canCraftRecipe(recipe)) {
+                self.consumeRecipeInputs(recipe);
+                _ = self.inventory.addItem(recipe.result_item, recipe.result_count);
+                return;
+            }
+        }
+    }
+
+    /// Tally distinct item requirements from a 3x3 recipe pattern.
+    /// A recipe grid has at most 9 cells, so at most 9 distinct item types.
+    const MAX_TALLY = 9;
+    const ItemTally = struct {
+        item: inventory_mod.ItemId,
+        count: u16,
+    };
+
+    fn tallyPattern(pattern: [3][3]inventory_mod.ItemId) struct { entries: [MAX_TALLY]ItemTally, len: usize } {
+        var entries: [MAX_TALLY]ItemTally = undefined;
+        var len: usize = 0;
+        for (pattern) |row| {
+            for (row) |cell| {
+                if (cell == 0) continue;
+                var found = false;
+                for (entries[0..len]) |*e| {
+                    if (e.item == cell) {
+                        e.count += 1;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    entries[len] = .{ .item = cell, .count = 1 };
+                    len += 1;
+                }
+            }
+        }
+        return .{ .entries = entries, .len = len };
+    }
+
+    fn canCraftRecipe(self: *const Engine, recipe: crafting_mod.Recipe) bool {
+        const tally = tallyPattern(recipe.pattern);
+        for (tally.entries[0..tally.len]) |req| {
+            var have: u16 = 0;
+            for (self.inventory.slots) |slot| {
+                if (slot.item == req.item and slot.count > 0) {
+                    have += slot.count;
+                }
+            }
+            if (have < req.count) return false;
+        }
+        return true;
+    }
+
+    fn consumeRecipeInputs(self: *Engine, recipe: crafting_mod.Recipe) void {
+        const tally = tallyPattern(recipe.pattern);
+        for (tally.entries[0..tally.len]) |req| {
+            var remaining = req.count;
+            for (&self.inventory.slots) |*slot| {
+                if (remaining == 0) break;
+                if (slot.item == req.item and slot.count > 0) {
+                    const take = @min(slot.count, @as(u8, @intCast(remaining)));
+                    slot.count -= take;
+                    if (slot.count == 0) slot.item = 0;
+                    remaining -= take;
+                }
+            }
+        }
+    }
+
+    /// Interact with a furnace block: find or create the furnace state,
+    /// then add the held item as fuel/input, or collect output if empty-handed.
+    fn interactFurnace(self: *Engine, wx: i32, wy: i32, wz: i32) void {
+        const fs = self.getOrCreateFurnace(wx, wy, wz) orelse return;
+
+        const slot = self.inventory.getSlot(self.selected_slot);
+        if (slot.isEmpty()) {
+            const output = fs.takeOutput();
+            if (output.count > 0) {
+                _ = self.inventory.addItem(output.item, output.count);
+            }
+            return;
+        }
+
+        const item_id = slot.item;
+        const accepted = if (furnace_mod.getFuelValue(item_id) != null)
+            fs.addFuel(item_id, 1) == 0
+        else if (furnace_mod.findRecipe(item_id) != null)
+            fs.addInput(item_id, 1) == 0
+        else
+            false;
+
+        if (accepted) {
+            _ = self.inventory.removeItem(self.selected_slot, 1);
+        }
+    }
+
+    fn getOrCreateFurnace(self: *Engine, wx: i32, wy: i32, wz: i32) ?*furnace_mod.FurnaceState {
+        for (self.active_furnaces.items) |*entry| {
+            if (entry.x == wx and entry.y == wy and entry.z == wz) {
+                return &entry.state;
+            }
+        }
+        self.active_furnaces.append(self.allocator, .{
+            .x = wx,
+            .y = wy,
+            .z = wz,
+            .state = furnace_mod.FurnaceState.init(),
+        }) catch return null;
+        return &self.active_furnaces.items[self.active_furnaces.items.len - 1].state;
     }
 
     fn breakBlock(self: *Engine, wx: i32, wy: i32, wz: i32) void {
@@ -723,4 +880,12 @@ test "health module" {
 
 test "water module" {
     _ = water_mod;
+}
+
+test "crafting module" {
+    _ = crafting_mod;
+}
+
+test "furnace module" {
+    _ = furnace_mod;
 }
