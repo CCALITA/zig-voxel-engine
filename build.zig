@@ -171,6 +171,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_redstone_component_tests = b.addRunArtifact(redstone_component_tests);
 
+    // Structure generation tests (rooted at src/world/ for relative import resolution)
+    const structures_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/world/structures_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_structures_tests = b.addRunArtifact(structures_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -182,4 +192,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_network_client_tests.step);
     test_step.dependOn(&run_redstone_tests.step);
     test_step.dependOn(&run_redstone_component_tests.step);
+    test_step.dependOn(&run_structures_tests.step);
 }
