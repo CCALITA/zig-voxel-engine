@@ -191,6 +191,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_experience_tests = b.addRunArtifact(experience_tests);
 
+    // Gameplay game-mode tests
+    const gamemode_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/gamemode.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_gamemode_tests = b.addRunArtifact(gamemode_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -204,4 +214,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_redstone_component_tests.step);
     test_step.dependOn(&run_structures_tests.step);
     test_step.dependOn(&run_experience_tests.step);
+    test_step.dependOn(&run_gamemode_tests.step);
 }
