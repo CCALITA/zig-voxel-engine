@@ -21,6 +21,8 @@ pub const inventory_mod = @import("gameplay/inventory.zig");
 pub const time_mod = @import("world/time.zig");
 pub const mob_mod = @import("entity/mob.zig");
 pub const entity_mod = @import("entity/entity.zig");
+pub const health_mod = @import("gameplay/health.zig");
+pub const water_mod = @import("physics/water.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -29,6 +31,7 @@ const RENDER_RADIUS: i32 = 6;
 const PLAYER_WIDTH: f32 = 0.6;
 const PLAYER_HEIGHT: f32 = 1.8;
 const PLAYER_HALF_W: f32 = PLAYER_WIDTH / 2.0;
+const PLAYER_EYE_HEIGHT: f32 = 1.6;
 
 pub const Engine = struct {
     allocator: std.mem.Allocator,
@@ -62,6 +65,10 @@ pub const Engine = struct {
 
     // Entity/mob system
     mob_manager: mob_mod.MobManager,
+
+    // Health and water physics
+    player_stats: health_mod.PlayerStats,
+    water_state: water_mod.WaterState,
 
     const ChunkKey = struct { x: i32, z: i32 };
 
@@ -169,6 +176,8 @@ pub const Engine = struct {
             .inventory = inventory,
             .game_time = .{},
             .mob_manager = mob_manager,
+            .player_stats = health_mod.PlayerStats.init(),
+            .water_state = water_mod.WaterState.init(),
         };
     }
 
@@ -210,10 +219,31 @@ pub const Engine = struct {
             if (self.window.handle.getKey(.d) == .press) right_input += 1;
             if (self.window.handle.getKey(.a) == .press) right_input -= 1;
 
-            // Jump
-            if (self.window.handle.getKey(.space) == .press and self.on_ground) {
-                self.player_vy = 8.0; // jump impulse
-                self.on_ground = false;
+            // Skip gameplay updates if dead
+            if (self.player_stats.is_dead) {
+                self.renderFrame(dt);
+                continue;
+            }
+
+            // Update water contact before movement decisions
+            WaterBridge.engine_ctx = self;
+            self.water_state.updateWaterContact(
+                self.player_x,
+                self.player_y,
+                self.player_z,
+                self.player_y + PLAYER_EYE_HEIGHT,
+                &WaterBridge.isWater,
+            );
+            WaterBridge.engine_ctx = null;
+
+            // Jump / swim
+            if (self.window.handle.getKey(.space) == .press) {
+                if (self.water_state.in_water and !self.on_ground) {
+                    self.player_vy = self.water_state.getSwimUpSpeed();
+                } else if (self.on_ground) {
+                    self.player_vy = 8.0; // jump impulse
+                    self.on_ground = false;
+                }
             }
 
             if (self.window.handle.getKey(.escape) == .press) {
@@ -234,7 +264,7 @@ pub const Engine = struct {
             // Horizontal movement based on camera direction
             const fwd = self.camera.forward();
             const rt = self.camera.right();
-            const speed: f32 = 6.0;
+            const speed: f32 = 6.0 * self.water_state.getSpeedMultiplier();
             var move_x: f32 = 0;
             var move_z: f32 = 0;
 
@@ -244,9 +274,13 @@ pub const Engine = struct {
             move_x += rt[0] * right_input * speed * dt;
             move_z += rt[2] * right_input * speed * dt;
 
-            // Apply gravity
-            const gravity: f32 = -20.0;
+            // Apply gravity (reduced in water)
+            const gravity: f32 = self.water_state.getGravity();
             self.player_vy += gravity * dt;
+
+            // Track pre-collision velocity for fall damage
+            const pre_land_vy = self.player_vy;
+            const was_on_ground = self.on_ground;
 
             // Attempt movement with simple AABB collision
             // Try Y movement first (gravity/jump)
@@ -271,30 +305,41 @@ pub const Engine = struct {
                 self.player_z = new_z;
             }
 
-            // Update camera position from player (eye height = feet + 1.6)
-            const zm = @import("zmath");
-            self.camera.pos = zm.f32x4(self.player_x, self.player_y + 1.6, self.player_z, 1.0);
+            // Fall damage: when landing (on_ground transitions false -> true)
+            if (self.on_ground and !was_on_ground and pre_land_vy < -10.0) {
+                self.player_stats.takeDamage(@abs(pre_land_vy) - 10.0);
+            }
 
-            // Update day/night cycle
-            self.game_time.update(@as(f64, @floatCast(dt)));
+            // Update health/hunger
+            self.player_stats.update(dt);
 
             // Update mob AI and remove dead entities
             self.mob_manager.update(self.player_x, self.player_y, self.player_z, dt);
             self.mob_manager.removeDeadEntities();
 
-            self.updateChunkLoading();
+            // Drowning damage
+            const drown_dmg = self.water_state.updateOxygen(dt);
+            if (drown_dmg > 0) {
+                self.player_stats.takeDamage(drown_dmg);
+            }
 
-            // Compute VP matrix
-            const vp = self.camera.vpMatrix();
-            const vp_arr = Camera.matToArray(vp);
-
-            self.renderer.drawFrame(vp_arr, self.game_time.getSkyColor(), self.game_time.getFogColor()) catch |err| {
-                std.debug.print("Render error: {}\n", .{err});
-                return;
-            };
+            self.renderFrame(dt);
         }
 
         self.renderer.waitIdle();
+    }
+
+    /// Update camera, day/night cycle, chunk loading, and draw a frame.
+    fn renderFrame(self: *Engine, dt: f32) void {
+        const zm = @import("zmath");
+        self.camera.pos = zm.f32x4(self.player_x, self.player_y + PLAYER_EYE_HEIGHT, self.player_z, 1.0);
+        self.game_time.update(@as(f64, @floatCast(dt)));
+        self.updateChunkLoading();
+        const vp = self.camera.vpMatrix();
+        const vp_arr = Camera.matToArray(vp);
+        self.renderer.drawFrame(vp_arr, self.game_time.getSkyColor(), self.game_time.getFogColor()) catch |err| {
+            std.debug.print("Render error: {}\n", .{err});
+        };
     }
 
     fn updateChunkLoading(self: *Engine) void {
@@ -410,6 +455,18 @@ pub const Engine = struct {
             const eng = engine_ctx orelse return false;
             const bid = eng.getWorldBlock(x, y, z) orelse return false;
             return block.isSolid(bid);
+        }
+    };
+
+    /// Water block check wrapper. Uses a static var to pass the Engine pointer
+    /// into the function-pointer callback required by WaterState.updateWaterContact().
+    const WaterBridge = struct {
+        var engine_ctx: ?*Engine = null;
+
+        fn isWater(x: i32, y: i32, z: i32) bool {
+            const eng = engine_ctx orelse return false;
+            const bid = eng.getWorldBlock(x, y, z) orelse return false;
+            return bid == block.WATER;
         }
     };
 
@@ -658,4 +715,12 @@ test "mob module" {
 
 test "entity module" {
     _ = entity_mod;
+}
+
+test "health module" {
+    _ = health_mod;
+}
+
+test "water module" {
+    _ = water_mod;
 }
