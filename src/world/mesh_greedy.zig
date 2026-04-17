@@ -166,7 +166,7 @@ pub fn generateMesh(allocator: std.mem.Allocator, chunk: *const Chunk, neighbors
                     }
 
                     // Emit quad.
-                    const tex: u12 = @intCast(entry - 1); // undo the +1
+                    const tex: u6 = @intCast(entry - 1); // undo the +1
                     const base: u32 = @intCast(vertices.items.len);
                     const corners = face_corners[face_idx];
                     const s_base: u5 = @intCast(slice);
@@ -184,6 +184,8 @@ pub fn generateMesh(allocator: std.mem.Allocator, chunk: *const Chunk, neighbors
                             .z = pos[2],
                             .face = @intCast(face_idx),
                             .corner = @intCast(ci),
+                            .ao = 0,
+                            .light = 0,
                             .tex = tex,
                         });
                     }
