@@ -16,6 +16,7 @@ pub const terrain_gen = @import("world/terrain_gen.zig");
 pub const noise = @import("world/noise.zig");
 pub const chunk_map = @import("world/chunk_map.zig");
 pub const chunk_loader_mod = @import("world/chunk_loader.zig");
+pub const persistence_mod = @import("world/persistence.zig");
 pub const raycast = @import("gameplay/raycast.zig");
 pub const inventory_mod = @import("gameplay/inventory.zig");
 pub const time_mod = @import("world/time.zig");
@@ -46,6 +47,7 @@ pub const Engine = struct {
     // World chunk columns stored for collision (256-block height per column)
     chunks: std.AutoHashMap(ChunkKey, ChunkColumn),
     chunk_loader: chunk_loader_mod.ChunkLoader,
+    persistence: persistence_mod.WorldPersistence,
 
     // Player physics
     player_x: f32,
@@ -85,6 +87,7 @@ pub const Engine = struct {
 
         var chunks = std.AutoHashMap(ChunkKey, ChunkColumn).init(allocator);
         var chunk_loader = chunk_loader_mod.ChunkLoader.init(allocator, RENDER_RADIUS);
+        var persistence = try persistence_mod.WorldPersistence.init(allocator, "default");
 
         // Generate a small initial set (3x3 around spawn) to avoid blank first frame
         const INIT_RADIUS: i32 = 1;
@@ -92,7 +95,10 @@ pub const Engine = struct {
         while (cx <= INIT_RADIUS) : (cx += 1) {
             var cz: i32 = -INIT_RADIUS;
             while (cz <= INIT_RADIUS) : (cz += 1) {
-                const column = terrain_gen.generateColumn(allocator, SEED, cx, cz);
+                const column = if (persistence.loadColumn(cx, cz) catch null) |saved|
+                    saved
+                else
+                    terrain_gen.generateColumn(allocator, SEED, cx, cz);
                 try chunks.put(.{ .x = cx, .z = cz }, column);
                 try chunk_loader.markLoaded(.{ .x = cx, .z = cz });
             }
@@ -165,6 +171,7 @@ pub const Engine = struct {
             .first_mouse = true,
             .chunks = chunks,
             .chunk_loader = chunk_loader,
+            .persistence = persistence,
             .player_x = 8.0,
             .player_y = spawn_y,
             .player_z = 8.0,
@@ -182,6 +189,11 @@ pub const Engine = struct {
     }
 
     pub fn deinit(self: *Engine) void {
+        // Save all modified chunks to disk before cleanup
+        _ = self.persistence.saveAllDirtyColumns(&self.chunks) catch |err| {
+            std.debug.print("Failed to save dirty chunks on exit: {}\n", .{err});
+        };
+        self.persistence.deinit();
         self.mob_manager.deinit();
         self.renderer.deinit();
         self.window.deinit();
@@ -361,7 +373,11 @@ pub const Engine = struct {
     }
 
     fn loadChunk(self: *Engine, cx: i32, cz: i32) void {
-        const column = terrain_gen.generateColumn(self.allocator, SEED, cx, cz);
+        // Try loading saved chunk from disk; fall back to terrain generation
+        const column = if (self.persistence.loadColumn(cx, cz) catch null) |saved|
+            saved
+        else
+            terrain_gen.generateColumn(self.allocator, SEED, cx, cz);
         self.chunks.put(.{ .x = cx, .z = cz }, column) catch return;
         self.meshAndUploadColumn(cx, cz);
         self.chunk_loader.markLoaded(.{ .x = cx, .z = cz }) catch return;
@@ -443,6 +459,7 @@ pub const Engine = struct {
         const lx: u4 = @intCast(@mod(wx, @as(i32, Chunk.SIZE)));
         const lz: u4 = @intCast(@mod(wz, @as(i32, Chunk.SIZE)));
         col_ptr.setBlock(lx, @intCast(wy), lz, id);
+        self.persistence.markDirty(cx, cz) catch {};
         return true;
     }
 
@@ -723,4 +740,8 @@ test "health module" {
 
 test "water module" {
     _ = water_mod;
+}
+
+test "persistence module" {
+    _ = persistence_mod;
 }
