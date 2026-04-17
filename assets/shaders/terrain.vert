@@ -6,7 +6,9 @@
 // bits [10..14] = z (0-16)
 // bits [15..17] = face (0-5)
 // bits [18..19] = corner (0-3)
-// bits [20..31] = tex layer (0-4095)
+// bits [20..21] = ao (0-3)
+// bits [22..25] = light (0-15)
+// bits [26..31] = tex (0-63)
 
 layout(location = 0) in uint packed_vertex;
 
@@ -37,17 +39,25 @@ const vec2 corner_uvs[4] = vec2[4](
 );
 
 void main() {
-    uint x     = (packed_vertex >>  0) & 0x1Fu;
-    uint y     = (packed_vertex >>  5) & 0x1Fu;
-    uint z     = (packed_vertex >> 10) & 0x1Fu;
-    uint face  = (packed_vertex >> 15) & 0x07u;
+    uint x      = (packed_vertex >>  0) & 0x1Fu;
+    uint y      = (packed_vertex >>  5) & 0x1Fu;
+    uint z      = (packed_vertex >> 10) & 0x1Fu;
+    uint face   = (packed_vertex >> 15) & 0x07u;
     uint corner = (packed_vertex >> 18) & 0x03u;
-    uint tex   = (packed_vertex >> 20) & 0xFFFu;
+    uint ao_val = (packed_vertex >> 20) & 0x03u;
+    uint light  = (packed_vertex >> 22) & 0x0Fu;
+    uint tex    = (packed_vertex >> 26) & 0x3Fu;
 
     vec3 pos = vec3(float(x), float(y), float(z));
     gl_Position = pc.mvp * vec4(pos, 1.0);
 
     frag_uv = corner_uvs[corner];
     frag_tex = tex;
-    frag_shade = face_shade[min(face, 5u)];
+
+    // AO darkening: 1.0, 0.75, 0.5, 0.25
+    float ao_factor = 1.0 - float(ao_val) * 0.25;
+    // Light level: 0.1 (dark) to 1.0 (full light)
+    float light_factor = 0.1 + float(light) / 15.0 * 0.9;
+
+    frag_shade = face_shade[min(face, 5u)] * ao_factor * light_factor;
 }
