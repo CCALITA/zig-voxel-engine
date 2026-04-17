@@ -66,6 +66,7 @@ pub const BED: BlockId = 41;
 pub const LADDER: BlockId = 42;
 pub const CHEST: BlockId = 43;
 pub const TRAPDOOR: BlockId = 44;
+pub const END_STONE: BlockId = 45;
 
 // Texture atlas indices (placeholder -- will map to real textures later)
 const T_STONE: u16 = 0;
@@ -122,6 +123,7 @@ const T_LADDER: u16 = 50;
 const T_CHEST_SIDE: u16 = 51;
 const T_CHEST_TOP: u16 = 52;
 const T_TRAPDOOR: u16 = 53;
+const T_END_STONE: u16 = 54;
 
 fn allFaces(tex: u16) [6]u16 {
     return .{ tex, tex, tex, tex, tex, tex };
@@ -178,6 +180,7 @@ pub const BLOCKS = [_]BlockDef{
     .{ .name = "ladder", .tex = allFaces(T_LADDER), .solid = false, .transparent = true }, // 42
     .{ .name = "chest", .tex = topBottomSide(T_CHEST_TOP, T_CHEST_TOP, T_CHEST_SIDE) }, // 43
     .{ .name = "trapdoor", .tex = allFaces(T_TRAPDOOR), .solid = false }, // 44
+    .{ .name = "end_stone", .tex = allFaces(T_END_STONE) }, // 45
 };
 
 pub fn get(id: BlockId) BlockDef {
@@ -208,8 +211,8 @@ test "grass has different top texture" {
     try std.testing.expect(grass.tex[@intFromEnum(Face.top)] != grass.tex[@intFromEnum(Face.north)]);
 }
 
-test "block registry has 45 entries" {
-    try std.testing.expectEqual(@as(usize, 45), BLOCKS.len);
+test "block registry has 46 entries" {
+    try std.testing.expectEqual(@as(usize, 46), BLOCKS.len);
 }
 
 test "glass is not solid but is transparent" {
