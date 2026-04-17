@@ -29,6 +29,7 @@ pub const persistence_mod = @import("world/persistence.zig");
 pub const item_drop_mod = @import("gameplay/item_drop.zig");
 pub const crafting_mod = @import("gameplay/crafting.zig");
 pub const furnace_mod = @import("gameplay/furnace.zig");
+pub const particles_mod = @import("renderer/particles.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -91,6 +92,9 @@ pub const Engine = struct {
     crafting_registry: crafting_mod.CraftingRegistry,
     active_furnaces: std.ArrayList(FurnaceEntry),
     last_craft_key: bool,
+
+    // Particle system
+    particle_manager: particles_mod.ParticleManager,
 
     const FurnaceEntry = struct {
         x: i32,
@@ -225,6 +229,7 @@ pub const Engine = struct {
             .crafting_registry = crafting_registry,
             .active_furnaces = .empty,
             .last_craft_key = false,
+            .particle_manager = particles_mod.ParticleManager.init(),
         };
     }
 
@@ -399,6 +404,9 @@ pub const Engine = struct {
                 }
             } else |_| {}
             self.drop_manager.cleanup();
+
+            // Update particle simulation
+            self.particle_manager.update(dt);
 
             self.renderFrame(dt);
         }
@@ -764,6 +772,11 @@ pub const Engine = struct {
             const fx: f32 = @as(f32, @floatFromInt(wx)) + 0.5;
             const fy: f32 = @as(f32, @floatFromInt(wy)) + 0.5;
             const fz: f32 = @as(f32, @floatFromInt(wz)) + 0.5;
+
+            // Emit break particles with the block's color
+            const color = getBlockColor(old_block);
+            self.particle_manager.emitBlockBreak(fx, fy, fz, color[0], color[1], color[2]);
+
             self.drop_manager.spawnDrop(fx, fy, fz, @as(u16, old_block), 1) catch {};
         }
 
@@ -911,6 +924,47 @@ fn meshColumnSections(
     }
 }
 
+/// Approximate block colors matching the terrain.frag palette.
+/// Maps a block ID to an RGB color for particle effects.
+fn getBlockColor(block_id: block.BlockId) [3]f32 {
+    return switch (block_id) {
+        block.STONE => .{ 0.50, 0.50, 0.50 },
+        block.DIRT => .{ 0.55, 0.35, 0.20 },
+        block.GRASS => .{ 0.30, 0.65, 0.15 },
+        block.COBBLESTONE => .{ 0.40, 0.40, 0.40 },
+        block.OAK_PLANKS => .{ 0.70, 0.55, 0.30 },
+        block.SAND => .{ 0.85, 0.80, 0.55 },
+        block.GRAVEL => .{ 0.55, 0.50, 0.45 },
+        block.OAK_LOG => .{ 0.40, 0.30, 0.15 },
+        block.OAK_LEAVES => .{ 0.20, 0.50, 0.10 },
+        block.WATER => .{ 0.20, 0.35, 0.80 },
+        block.BEDROCK => .{ 0.25, 0.25, 0.25 },
+        block.COAL_ORE => .{ 0.35, 0.35, 0.35 },
+        block.IRON_ORE => .{ 0.55, 0.50, 0.45 },
+        block.GOLD_ORE => .{ 0.65, 0.60, 0.30 },
+        block.DIAMOND_ORE => .{ 0.40, 0.65, 0.65 },
+        block.REDSTONE_ORE => .{ 0.55, 0.25, 0.20 },
+        block.GLASS => .{ 0.75, 0.85, 0.90 },
+        block.BRICK => .{ 0.60, 0.30, 0.25 },
+        block.OBSIDIAN => .{ 0.10, 0.05, 0.15 },
+        block.TNT => .{ 0.75, 0.30, 0.25 },
+        block.BOOKSHELF => .{ 0.50, 0.35, 0.20 },
+        block.MOSSY_COBBLESTONE => .{ 0.35, 0.45, 0.30 },
+        block.ICE => .{ 0.65, 0.80, 0.95 },
+        block.SNOW => .{ 0.90, 0.92, 0.95 },
+        block.CLAY => .{ 0.65, 0.62, 0.58 },
+        block.CACTUS => .{ 0.20, 0.55, 0.15 },
+        block.PUMPKIN => .{ 0.80, 0.50, 0.10 },
+        block.MELON => .{ 0.40, 0.60, 0.20 },
+        block.GLOWSTONE => .{ 0.85, 0.75, 0.40 },
+        block.NETHERRACK => .{ 0.45, 0.20, 0.20 },
+        block.SOUL_SAND => .{ 0.35, 0.28, 0.22 },
+        block.LAVA => .{ 0.90, 0.40, 0.10 },
+        block.FURNACE => .{ 0.50, 0.50, 0.50 },
+        else => .{ 0.50, 0.50, 0.50 },
+    };
+}
+
 test "subsystem count" {
     // Removed — no longer relevant with dynamic chunk count
 }
@@ -1005,4 +1059,8 @@ test "crafting module" {
 
 test "furnace module" {
     _ = furnace_mod;
+}
+
+test "particles module" {
+    _ = particles_mod;
 }
