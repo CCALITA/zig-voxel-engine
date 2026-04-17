@@ -831,6 +831,24 @@ pub fn clearChunks(self: *Self) void {
     self.chunk_renders.clearRetainingCapacity();
 }
 
+/// Remove the render data for the chunk at the given world x/z position.
+/// Destroys the GPU vertex and index buffers to avoid memory leaks.
+pub fn removeChunkRender(self: *Self, world_x: i32, world_z: i32) void {
+    var i: usize = 0;
+    while (i < self.chunk_renders.items.len) {
+        const cr = self.chunk_renders.items[i];
+        if (cr.world_x == world_x and cr.world_z == world_z) {
+            self.vkd.destroyBuffer(self.device, cr.vertex_buffer, null);
+            self.vkd.freeMemory(self.device, cr.vertex_buffer_memory, null);
+            self.vkd.destroyBuffer(self.device, cr.index_buffer, null);
+            self.vkd.freeMemory(self.device, cr.index_buffer_memory, null);
+            _ = self.chunk_renders.swapRemove(i);
+            return;
+        }
+        i += 1;
+    }
+}
+
 fn translationMatrix(tx: f32, ty: f32, tz: f32) [4][4]f32 {
     return .{
         .{ 1, 0, 0, 0 },
