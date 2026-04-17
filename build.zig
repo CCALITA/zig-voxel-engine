@@ -117,10 +117,21 @@ pub fn build(b: *std.Build) void {
     });
     const run_caves_tests = b.addRunArtifact(caves_tests);
 
+    // Structure generation tests (rooted at src/world/ for relative import resolution)
+    const structures_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/world/structures_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_structures_tests = b.addRunArtifact(structures_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_physics_collision_tests.step);
     test_step.dependOn(&run_tree_gen_tests.step);
     test_step.dependOn(&run_caves_tests.step);
+    test_step.dependOn(&run_structures_tests.step);
 }
