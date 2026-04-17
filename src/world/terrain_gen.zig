@@ -99,6 +99,10 @@ pub fn generateChunk(
 /// 256-high column heights. Biome base_height ~8 maps to ~64.
 const COL_HEIGHT_SCALE: f64 = 8.0;
 
+/// Sea level for the 256-high world. Columns with terrain below this height
+/// are filled with water up to SEA_LEVEL.
+const SEA_LEVEL: u8 = 62;
+
 // ---------------------------------------------------------------------------
 // Column-based generation (256-high world)
 // ---------------------------------------------------------------------------
@@ -148,13 +152,24 @@ pub fn generateColumn(
                 biome_def.surface_block,
                 biome_def.filler_block,
             );
+
+            // Fill ocean water for columns below sea level
+            if (terrain_height < SEA_LEVEL) {
+                var y: u8 = terrain_height + 1;
+                while (y <= SEA_LEVEL) : (y += 1) {
+                    column.setBlock(@intCast(lx), y, @intCast(lz), block.WATER);
+                }
+            }
         }
     }
 
     // --- Phase 2: Place ore veins (before cave carving so caves cut through ores) ---
     placeOreVeins(&column, seed, chunk_x, chunk_z);
 
-    // --- Phase 3: Place structures at surface level ---
+    // --- Phase 3: Carve caves across all terrain sections ---
+    carveCavesInColumn(&column, seed, chunk_x, chunk_z);
+
+    // --- Phase 4: Place structures at surface level ---
     if (structures.shouldPlaceStructure(seed, chunk_x, chunk_z)) |result| {
         const template = structures.getTemplate(result.structure_type);
         const surface_y = column.getHeight(result.local_x, result.local_z);
@@ -166,6 +181,11 @@ pub fn generateColumn(
             origin_y,
             @as(i32, result.local_z),
         );
+    }
+
+    // --- Phase 5: Place trees on surface sections ---
+    if (chunkHasTrees(&biome_noise, chunk_x, chunk_z)) {
+        placeTreesInColumn(&column, seed, chunk_x, chunk_z);
     }
 
     return column;
@@ -396,6 +416,176 @@ fn placeStructureInColumn(
             wz < 0 or wz >= Chunk.SIZE) continue;
 
         column.setBlock(@intCast(wx), @intCast(wy), @intCast(wz), sb.block_id);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Column cave carving
+// ---------------------------------------------------------------------------
+
+/// Maximum world-space Y level for cave carving in the 256-high world.
+/// Caves are carved from y=1 up to (but not including) this value.
+const COL_MAX_CAVE_Y: u8 = 128;
+
+/// Noise parameters matching caves.zig but applied to world-space coordinates.
+const COL_CAVE_NOISE_SCALE: f64 = 0.07;
+const COL_CAVE_NOISE_SCALE_2: f64 = COL_CAVE_NOISE_SCALE * 2.0;
+const COL_CAVE_OCTAVE2_WEIGHT: f64 = 0.5;
+const COL_CAVE_THRESHOLD: f64 = 0.35;
+const COL_CAVE_SEED_OFFSET: u64 = 12345;
+
+/// Carve caves across the full 256-high chunk column using 3D noise.
+/// Uses the same noise algorithm as caves.zig but operates on world-space
+/// Y coordinates spanning multiple sections.
+fn carveCavesInColumn(column: *ChunkColumn, seed: u64, chunk_x: i32, chunk_z: i32) void {
+    const pt = noise.PermTable.init(seed +% COL_CAVE_SEED_OFFSET);
+
+    const base_x: f64 = @floatFromInt(@as(i64, chunk_x) * Chunk.SIZE);
+    const base_z: f64 = @floatFromInt(@as(i64, chunk_z) * Chunk.SIZE);
+
+    var y: u8 = 1;
+    while (y < COL_MAX_CAVE_Y) : (y += 1) {
+        const wy: f64 = @floatFromInt(y);
+
+        for (0..Chunk.SIZE) |z| {
+            const wz: f64 = base_z + @as(f64, @floatFromInt(z));
+
+            for (0..Chunk.SIZE) |x| {
+                const wx: f64 = base_x + @as(f64, @floatFromInt(x));
+
+                const current = column.getBlock(@intCast(x), y, @intCast(z));
+
+                if (current == block.BEDROCK or !block.isSolid(current)) continue;
+
+                const n1 = noise.noise3d(&pt, wx * COL_CAVE_NOISE_SCALE, wy * COL_CAVE_NOISE_SCALE, wz * COL_CAVE_NOISE_SCALE);
+                const n2 = noise.noise3d(&pt, wx * COL_CAVE_NOISE_SCALE_2, wy * COL_CAVE_NOISE_SCALE_2, wz * COL_CAVE_NOISE_SCALE_2);
+                const combined = (n1 + n2 * COL_CAVE_OCTAVE2_WEIGHT) / (1.0 + COL_CAVE_OCTAVE2_WEIGHT);
+
+                if (combined > COL_CAVE_THRESHOLD) {
+                    column.setBlock(@intCast(x), y, @intCast(z), block.AIR);
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Column tree placement
+// ---------------------------------------------------------------------------
+
+/// Tree noise parameters (matching trees.zig).
+const COL_TREE_NOISE_FREQ: f64 = 0.3;
+const COL_TREE_NOISE_THRESHOLD: f64 = 0.35;
+const COL_TREE_SEED_OFFSET: u64 = 73_856_093;
+const COL_TRUNK_HEIGHT_SEED_OFFSET: u64 = 19_349_669;
+const COL_MIN_TRUNK_HEIGHT: u8 = 4;
+const COL_MAX_TRUNK_HEIGHT: u8 = 6;
+const COL_TREE_EDGE_MARGIN: u4 = 2;
+
+/// Place trees in a chunk column. Scans the surface for grass blocks and
+/// places oak trees at noise-determined positions.
+fn placeTreesInColumn(column: *ChunkColumn, seed: u64, chunk_x: i32, chunk_z: i32) void {
+    const tree_pt = noise.PermTable.init(seed +% COL_TREE_SEED_OFFSET);
+    const height_pt = noise.PermTable.init(seed +% COL_TRUNK_HEIGHT_SEED_OFFSET);
+
+    const min: u4 = COL_TREE_EDGE_MARGIN;
+    const max: u4 = Chunk.SIZE - 1 - COL_TREE_EDGE_MARGIN;
+
+    var lz: u4 = min;
+    while (lz <= max) : (lz += 1) {
+        var lx: u4 = min;
+        while (lx <= max) : (lx += 1) {
+            const world_x: f64 = @floatFromInt(@as(i32, lx) +% chunk_x * @as(i32, Chunk.SIZE));
+            const world_z: f64 = @floatFromInt(@as(i32, lz) +% chunk_z * @as(i32, Chunk.SIZE));
+
+            const n = noise.noise2d(&tree_pt, world_x * COL_TREE_NOISE_FREQ, world_z * COL_TREE_NOISE_FREQ);
+            if (n < COL_TREE_NOISE_THRESHOLD) continue;
+
+            // Find the topmost grass block in this column
+            const surface_y = findSurfaceGrassInColumn(column, lx, lz) orelse continue;
+
+            const trunk_height = colTrunkHeightFor(&height_pt, world_x, world_z);
+
+            placeTreeInColumn(column, lx, surface_y, lz, trunk_height);
+        }
+    }
+}
+
+/// Scan a column top-down for the topmost GRASS block, returning its y or null.
+fn findSurfaceGrassInColumn(column: *const ChunkColumn, x: u4, z: u4) ?u8 {
+    const h = column.getHeight(x, z);
+    if (h == 0) return null;
+    if (column.getBlock(x, h, z) == block.GRASS) return h;
+    // Scan downward a few blocks in case the very top is not grass
+    var y: u8 = h;
+    while (y > 0) {
+        y -= 1;
+        const b = column.getBlock(x, y, z);
+        if (b == block.GRASS) return y;
+        if (b == block.STONE) break;
+    }
+    return null;
+}
+
+/// Deterministically derive a trunk height for a column-world tree.
+fn colTrunkHeightFor(pt: *const noise.PermTable, wx: f64, wz: f64) u8 {
+    const min_f: f64 = @floatFromInt(COL_MIN_TRUNK_HEIGHT);
+    const max_f: f64 = @floatFromInt(COL_MAX_TRUNK_HEIGHT);
+    const n = noise.noise2d(pt, wx * 0.7, wz * 0.7);
+    const t = (n + 1.0) * 0.5;
+    const raw = min_f + t * (max_f - min_f);
+    return @intFromFloat(@max(min_f, @min(max_f, @round(raw))));
+}
+
+/// Place a single oak tree in a chunk column starting above surface_y.
+fn placeTreeInColumn(column: *ChunkColumn, x: u4, surface_y: u8, z: u4, trunk_height: u8) void {
+    const base_y: i32 = @as(i32, surface_y) + 1;
+    const top_y: i32 = base_y + @as(i32, trunk_height) - 1;
+    const canopy_top: i32 = top_y + 2;
+
+    // Abort if tree would exceed world height
+    if (canopy_top > 255) return;
+
+    // --- Trunk ---
+    {
+        var y: i32 = base_y;
+        while (y <= top_y) : (y += 1) {
+            column.setBlock(x, @intCast(y), z, block.OAK_LOG);
+        }
+    }
+
+    // --- Leaf canopy: 5x5x3 centered on trunk, corners removed ---
+    const canopy_base: i32 = top_y;
+
+    var cy: i32 = canopy_base;
+    while (cy <= canopy_top) : (cy += 1) {
+        if (cy < 0 or cy > 255) continue;
+
+        var dz: i32 = -2;
+        while (dz <= 2) : (dz += 1) {
+            var dx: i32 = -2;
+            while (dx <= 2) : (dx += 1) {
+                // Skip corners of the 5x5 square
+                if ((@abs(dx) == 2) and (@abs(dz) == 2)) continue;
+
+                // Skip the trunk column itself (already has OAK_LOG)
+                if (dx == 0 and dz == 0 and cy <= top_y) continue;
+
+                const bx: i32 = @as(i32, x) + dx;
+                const bz: i32 = @as(i32, z) + dz;
+
+                if (bx < 0 or bx >= Chunk.SIZE or bz < 0 or bz >= Chunk.SIZE) continue;
+
+                const bx_u: u4 = @intCast(bx);
+                const bz_u: u4 = @intCast(bz);
+                const cy_u: u8 = @intCast(cy);
+
+                // Don't overwrite existing solid blocks
+                if (block.isSolid(column.getBlock(bx_u, cy_u, bz_u))) continue;
+
+                column.setBlock(bx_u, cy_u, bz_u, block.OAK_LEAVES);
+            }
+        }
     }
 }
 
@@ -634,10 +824,6 @@ test "column: surface matches biome definition" {
     const col = generateColumn(std.testing.allocator, seed, 0, 0);
     const biome_noise = biome.BiomeNoise.init(seed);
 
-    // Structures may overwrite surface blocks, so check whether this chunk
-    // has a structure. If it does, skip the strict surface check.
-    const has_structure = structures.shouldPlaceStructure(seed, 0, 0) != null;
-
     for (0..Chunk.SIZE) |z| {
         for (0..Chunk.SIZE) |x| {
             const h = col.getHeight(@intCast(x), @intCast(z));
@@ -648,12 +834,16 @@ test "column: surface matches biome definition" {
                 const biome_def = biome.getDef(biome_type);
 
                 const surface = col.getBlock(@intCast(x), h, @intCast(z));
-                // Surface may be overwritten by a structure
-                if (has_structure) {
-                    try std.testing.expect(surface != block.AIR);
-                } else {
-                    try std.testing.expectEqual(biome_def.surface_block, surface);
-                }
+                // Surface may be overwritten by caves (AIR), trees (OAK_LOG,
+                // OAK_LEAVES), structures, or ocean water (WATER).
+                const is_expected = (surface == biome_def.surface_block or
+                    surface == block.OAK_LOG or
+                    surface == block.OAK_LEAVES or
+                    surface == block.WATER or
+                    surface == block.COBBLESTONE or
+                    surface == block.OAK_PLANKS or
+                    surface == block.MOSSY_COBBLESTONE);
+                try std.testing.expect(is_expected);
             }
         }
     }
@@ -767,4 +957,117 @@ test "column: ore vein determinism" {
             try std.testing.expect(false);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Cave tests for column generation
+// ---------------------------------------------------------------------------
+
+test "column: caves create air pockets below surface" {
+    const col = generateColumn(std.testing.allocator, 42, 0, 0);
+
+    // Look for air blocks between y=1 and y=127 (cave carving range)
+    var air_in_cave_zone: u32 = 0;
+    for (0..8) |section_idx| {
+        if (col.sections[section_idx]) |sec| {
+            for (0..Chunk.VOLUME) |i| {
+                const local_y = i / 256;
+                const world_y = section_idx * 16 + local_y;
+                // Skip y=0 (bedrock) and skip surface/above-surface air
+                if (world_y == 0) continue;
+                if (sec.blocks[i] == block.AIR) {
+                    // Check if there is solid terrain above this air block,
+                    // which indicates a cave rather than open sky
+                    const x: u4 = @intCast(i % 16);
+                    const z: u4 = @intCast((i / 16) % 16);
+                    const h = col.getHeight(x, z);
+                    if (world_y < h) {
+                        air_in_cave_zone += 1;
+                    }
+                }
+            }
+        }
+    }
+    // Caves should have carved some blocks underground
+    try std.testing.expect(air_in_cave_zone > 0);
+}
+
+test "column: caves do not carve bedrock" {
+    const col = generateColumn(std.testing.allocator, 42, 0, 0);
+
+    for (0..Chunk.SIZE) |z| {
+        for (0..Chunk.SIZE) |x| {
+            try std.testing.expectEqual(
+                block.BEDROCK,
+                col.getBlock(@intCast(x), 0, @intCast(z)),
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tree tests for column generation
+// ---------------------------------------------------------------------------
+
+test "column: trees place oak logs in terrain" {
+    // Use a seed and coordinates that produce a forested biome
+    const col = generateColumn(std.testing.allocator, 42, 0, 0);
+
+    var log_count: u32 = 0;
+    for (0..ChunkColumn.SECTIONS) |s| {
+        if (col.sections[s]) |sec| {
+            for (0..Chunk.VOLUME) |i| {
+                if (sec.blocks[i] == block.OAK_LOG) log_count += 1;
+            }
+        }
+    }
+    // At least some trees should have been placed (structures also use OAK_LOG)
+    try std.testing.expect(log_count > 0);
+}
+
+test "column: trees place leaves" {
+    const col = generateColumn(std.testing.allocator, 42, 0, 0);
+
+    var leaf_count: u32 = 0;
+    for (0..ChunkColumn.SECTIONS) |s| {
+        if (col.sections[s]) |sec| {
+            for (0..Chunk.VOLUME) |i| {
+                if (sec.blocks[i] == block.OAK_LEAVES) leaf_count += 1;
+            }
+        }
+    }
+    try std.testing.expect(leaf_count > 0);
+}
+
+// ---------------------------------------------------------------------------
+// Ocean water tests for column generation
+// ---------------------------------------------------------------------------
+
+test "column: ocean water fills below sea level" {
+    // Use a seed and chunk coordinates likely to produce ocean biome
+    // (or at least some terrain below sea level).
+    // Try multiple chunks to find one with terrain below sea level.
+    var found_water = false;
+    const seeds = [_]u64{ 42, 100, 200, 300 };
+    const coords = [_][2]i32{ .{ 0, 0 }, .{ 10, 10 }, .{ -5, 3 }, .{ 20, -20 } };
+
+    for (seeds) |seed| {
+        for (coords) |coord| {
+            const col = generateColumn(std.testing.allocator, seed, coord[0], coord[1]);
+            for (0..ChunkColumn.SECTIONS) |s| {
+                if (col.sections[s]) |sec| {
+                    for (0..Chunk.VOLUME) |i| {
+                        if (sec.blocks[i] == block.WATER) {
+                            found_water = true;
+                            break;
+                        }
+                    }
+                }
+                if (found_water) break;
+            }
+            if (found_water) break;
+        }
+        if (found_water) break;
+    }
+    try std.testing.expect(found_water);
 }
