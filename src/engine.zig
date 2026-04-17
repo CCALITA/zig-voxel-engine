@@ -29,6 +29,9 @@ pub const persistence_mod = @import("world/persistence.zig");
 pub const item_drop_mod = @import("gameplay/item_drop.zig");
 pub const crafting_mod = @import("gameplay/crafting.zig");
 pub const furnace_mod = @import("gameplay/furnace.zig");
+pub const xp_mod = @import("gameplay/experience.zig");
+pub const achievement_mod = @import("gameplay/achievements.zig");
+pub const armor_mod = @import("gameplay/armor.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -91,6 +94,11 @@ pub const Engine = struct {
     crafting_registry: crafting_mod.CraftingRegistry,
     active_furnaces: std.ArrayList(FurnaceEntry),
     last_craft_key: bool,
+
+    // Experience, achievements, and armor
+    xp: xp_mod.ExperienceTracker,
+    achievements: achievement_mod.AchievementTracker,
+    armor: armor_mod.ArmorInventory,
 
     const FurnaceEntry = struct {
         x: i32,
@@ -225,6 +233,9 @@ pub const Engine = struct {
             .crafting_registry = crafting_registry,
             .active_furnaces = .empty,
             .last_craft_key = false,
+            .xp = xp_mod.ExperienceTracker.init(),
+            .achievements = achievement_mod.AchievementTracker.init(),
+            .armor = armor_mod.ArmorInventory.init(),
         };
     }
 
@@ -375,7 +386,9 @@ pub const Engine = struct {
 
             // Fall damage: when landing (on_ground transitions false -> true)
             if (self.on_ground and !was_on_ground and pre_land_vy < -10.0) {
-                self.player_stats.takeDamage(@abs(pre_land_vy) - 10.0);
+                const fall_damage = @abs(pre_land_vy) - 10.0;
+                const reduced = self.armor.getDamageReduction(fall_damage);
+                self.player_stats.takeDamage(fall_damage - reduced);
             }
 
             // Update health/hunger
@@ -388,7 +401,8 @@ pub const Engine = struct {
             // Drowning damage
             const drown_dmg = self.water_state.updateOxygen(dt);
             if (drown_dmg > 0) {
-                self.player_stats.takeDamage(drown_dmg);
+                const drown_reduced = self.armor.getDamageReduction(drown_dmg);
+                self.player_stats.takeDamage(drown_dmg - drown_reduced);
             }
 
             // Update item drops (physics, pickup, despawn)
@@ -759,6 +773,29 @@ pub const Engine = struct {
         const old_block = self.getWorldBlock(wx, wy, wz) orelse return;
         if (!self.setWorldBlock(wx, wy, wz, block.AIR)) return;
 
+        // Achievement: first block break
+        _ = self.achievements.unlock(.mine_wood);
+
+        // XP reward for ore mining
+        const xp_reward: u32 = switch (old_block) {
+            block.COAL_ORE => xp_mod.XP_COAL_ORE,
+            block.IRON_ORE => xp_mod.XP_IRON_ORE,
+            block.GOLD_ORE => xp_mod.XP_GOLD_ORE,
+            block.DIAMOND_ORE => xp_mod.XP_DIAMOND_ORE,
+            block.REDSTONE_ORE => xp_mod.XP_REDSTONE_ORE,
+            else => 0,
+        };
+        if (xp_reward > 0) {
+            self.xp.addXP(xp_reward);
+            // Achievement: first ore mined
+            _ = self.achievements.unlock(.mine_stone);
+        }
+
+        // Achievement: diamond ore mined
+        if (old_block == block.DIAMOND_ORE) {
+            _ = self.achievements.unlock(.mine_diamond);
+        }
+
         // Spawn an item drop if the block was not air
         if (old_block != block.AIR) {
             const fx: f32 = @as(f32, @floatFromInt(wx)) + 0.5;
@@ -1005,4 +1042,16 @@ test "crafting module" {
 
 test "furnace module" {
     _ = furnace_mod;
+}
+
+test "experience module" {
+    _ = xp_mod;
+}
+
+test "achievement module" {
+    _ = achievement_mod;
+}
+
+test "armor module" {
+    _ = armor_mod;
 }
