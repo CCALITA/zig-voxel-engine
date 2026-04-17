@@ -13,6 +13,8 @@ pub const mesh_indexed = @import("world/mesh_indexed.zig");
 pub const mesh_greedy = @import("world/mesh_greedy.zig");
 pub const mesh = @import("world/mesh.zig");
 pub const terrain_gen = @import("world/terrain_gen.zig");
+pub const dimension_mod = @import("world/dimension.zig");
+pub const nether_gen = @import("world/nether_gen.zig");
 pub const noise = @import("world/noise.zig");
 pub const chunk_map = @import("world/chunk_map.zig");
 pub const chunk_loader_mod = @import("world/chunk_loader.zig");
@@ -77,6 +79,11 @@ pub const Engine = struct {
 
     // Item drops
     drop_manager: item_drop_mod.ItemDropManager,
+
+    // Dimension switching
+    current_dimension: dimension_mod.DimensionType,
+    overworld_player_pos: ?struct { x: f32, y: f32, z: f32 },
+    last_p_press: bool,
 
     const ChunkKey = struct { x: i32, z: i32 };
 
@@ -194,6 +201,9 @@ pub const Engine = struct {
             .water_state = water_mod.WaterState.init(),
             .persistence = persistence,
             .drop_manager = drop_manager,
+            .current_dimension = .overworld,
+            .overworld_player_pos = null,
+            .last_p_press = false,
         };
     }
 
@@ -280,6 +290,14 @@ pub const Engine = struct {
             // Block interaction (left/right mouse click)
             self.handleBlockInteraction();
 
+            // Portal key: P toggles between overworld and nether
+            const p_pressed = self.window.handle.getKey(.p) == .press;
+            if (p_pressed and !self.last_p_press) {
+                self.renderer.waitIdle();
+                self.switchDimension();
+            }
+            self.last_p_press = p_pressed;
+
             // Horizontal movement based on camera direction
             const fwd = self.camera.forward();
             const rt = self.camera.right();
@@ -357,6 +375,37 @@ pub const Engine = struct {
         self.renderer.waitIdle();
     }
 
+    fn switchDimension(self: *Engine) void {
+        if (self.current_dimension == .overworld) {
+            self.overworld_player_pos = .{
+                .x = self.player_x,
+                .y = self.player_y,
+                .z = self.player_z,
+            };
+            self.current_dimension = .nether;
+            // Nether coords = overworld / 8
+            self.player_x /= 8.0;
+            self.player_z /= 8.0;
+            self.player_y = 70.0; // spawn height in nether
+        } else {
+            self.current_dimension = .overworld;
+            if (self.overworld_player_pos) |pos| {
+                self.player_x = pos.x;
+                self.player_y = pos.y;
+                self.player_z = pos.z;
+            }
+        }
+        self.player_vy = 0.0;
+        self.on_ground = false;
+
+        // Unload all chunks and reload for new dimension
+        self.renderer.clearChunks();
+        self.chunks.clearAndFree();
+        self.chunk_loader.deinit();
+        self.chunk_loader = chunk_loader_mod.ChunkLoader.init(self.allocator, RENDER_RADIUS);
+        // Chunks will load via dynamic loader next frame
+    }
+
     /// Update camera, day/night cycle, chunk loading, and draw a frame.
     fn renderFrame(self: *Engine, dt: f32) void {
         const zm = @import("zmath");
@@ -365,7 +414,13 @@ pub const Engine = struct {
         self.updateChunkLoading();
         const vp = self.camera.vpMatrix();
         const vp_arr = Camera.matToArray(vp);
-        self.renderer.drawFrame(vp_arr, self.game_time.getSkyColor(), self.game_time.getFogColor()) catch |err| {
+
+        // Non-natural dimensions (nether, end) use fixed sky/fog instead of day/night cycle
+        const dim_def = dimension_mod.getDef(self.current_dimension);
+        const sky_color = if (dim_def.natural) self.game_time.getSkyColor() else dim_def.sky_color;
+        const fog_color = if (dim_def.natural) self.game_time.getFogColor() else dim_def.fog_color;
+
+        self.renderer.drawFrame(vp_arr, sky_color, fog_color) catch |err| {
             std.debug.print("Render error: {}\n", .{err});
         };
     }
@@ -392,6 +447,8 @@ pub const Engine = struct {
         // Try loading from disk first; fall back to terrain generation
         const column = if (self.persistence.loadColumn(cx, cz) catch null) |saved_col|
             saved_col
+        else if (self.current_dimension == .nether)
+            nether_gen.generateChunk(SEED, cx, cz)
         else
             terrain_gen.generateColumn(self.allocator, SEED, cx, cz);
         self.chunks.put(.{ .x = cx, .z = cz }, column) catch return;
@@ -775,4 +832,12 @@ test "persistence module" {
 
 test "item_drop module" {
     _ = item_drop_mod;
+}
+
+test "dimension module" {
+    _ = dimension_mod;
+}
+
+test "nether_gen module" {
+    _ = nether_gen;
 }
