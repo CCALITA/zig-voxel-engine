@@ -54,6 +54,12 @@ pub const GLOWSTONE: BlockId = 29;
 pub const NETHERRACK: BlockId = 30;
 pub const SOUL_SAND: BlockId = 31;
 pub const LAVA: BlockId = 32;
+pub const REDSTONE_WIRE: BlockId = 33;
+pub const REDSTONE_TORCH: BlockId = 34;
+pub const LEVER: BlockId = 35;
+pub const BUTTON: BlockId = 36;
+pub const PISTON: BlockId = 37;
+pub const REPEATER: BlockId = 38;
 
 // Texture atlas indices (placeholder -- will map to real textures later)
 const T_STONE: u16 = 0;
@@ -94,6 +100,13 @@ const T_GLOWSTONE: u16 = 34;
 const T_NETHERRACK: u16 = 35;
 const T_SOUL_SAND: u16 = 36;
 const T_LAVA: u16 = 37;
+const T_REDSTONE_WIRE: u16 = 38;
+const T_REDSTONE_TORCH: u16 = 39;
+const T_LEVER: u16 = 40;
+const T_BUTTON: u16 = 41;
+const T_PISTON_SIDE: u16 = 42;
+const T_PISTON_TOP: u16 = 43;
+const T_REPEATER: u16 = 44;
 
 fn allFaces(tex: u16) [6]u16 {
     return .{ tex, tex, tex, tex, tex, tex };
@@ -138,6 +151,12 @@ pub const BLOCKS = [_]BlockDef{
     .{ .name = "netherrack", .tex = allFaces(T_NETHERRACK) }, // 30
     .{ .name = "soul_sand", .tex = allFaces(T_SOUL_SAND) }, // 31
     .{ .name = "lava", .tex = allFaces(T_LAVA), .solid = false, .transparent = true }, // 32
+    .{ .name = "redstone_wire", .tex = allFaces(T_REDSTONE_WIRE), .solid = false }, // 33
+    .{ .name = "redstone_torch", .tex = allFaces(T_REDSTONE_TORCH), .solid = false }, // 34
+    .{ .name = "lever", .tex = allFaces(T_LEVER), .solid = false }, // 35
+    .{ .name = "button", .tex = allFaces(T_BUTTON), .solid = false }, // 36
+    .{ .name = "piston", .tex = topBottomSide(T_PISTON_TOP, T_PISTON_TOP, T_PISTON_SIDE) }, // 37
+    .{ .name = "repeater", .tex = allFaces(T_REPEATER), .solid = false }, // 38
 };
 
 pub fn get(id: BlockId) BlockDef {
@@ -168,8 +187,8 @@ test "grass has different top texture" {
     try std.testing.expect(grass.tex[@intFromEnum(Face.top)] != grass.tex[@intFromEnum(Face.north)]);
 }
 
-test "block registry has 33 entries" {
-    try std.testing.expectEqual(@as(usize, 33), BLOCKS.len);
+test "block registry has 39 entries" {
+    try std.testing.expectEqual(@as(usize, 39), BLOCKS.len);
 }
 
 test "glass is not solid but is transparent" {
@@ -213,4 +232,16 @@ test "texture indices fit in u6" {
             try std.testing.expect(t < 64);
         }
     }
+}
+
+test "redstone blocks are not solid" {
+    try std.testing.expect(!isSolid(REDSTONE_WIRE));
+    try std.testing.expect(!isSolid(REDSTONE_TORCH));
+    try std.testing.expect(!isSolid(LEVER));
+    try std.testing.expect(!isSolid(BUTTON));
+    try std.testing.expect(!isSolid(REPEATER));
+}
+
+test "piston is solid" {
+    try std.testing.expect(isSolid(PISTON));
 }
