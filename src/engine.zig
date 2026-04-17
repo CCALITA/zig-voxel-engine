@@ -29,6 +29,9 @@ pub const persistence_mod = @import("world/persistence.zig");
 pub const item_drop_mod = @import("gameplay/item_drop.zig");
 pub const crafting_mod = @import("gameplay/crafting.zig");
 pub const furnace_mod = @import("gameplay/furnace.zig");
+pub const weather_mod = @import("world/weather.zig");
+pub const movement_mod = @import("gameplay/movement.zig");
+pub const gamemode_mod = @import("gameplay/gamemode.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -91,6 +94,18 @@ pub const Engine = struct {
     crafting_registry: crafting_mod.CraftingRegistry,
     active_furnaces: std.ArrayList(FurnaceEntry),
     last_craft_key: bool,
+
+    // Weather system
+    weather: weather_mod.WeatherState,
+
+    // Movement (sprint/sneak) system
+    movement: movement_mod.MovementState,
+
+    // Game mode system
+    gamemode: gamemode_mod.GameModeManager,
+    last_f1_press: bool,
+    last_space_press_time: f64,
+    last_space_press: bool,
 
     const FurnaceEntry = struct {
         x: i32,
@@ -225,6 +240,12 @@ pub const Engine = struct {
             .crafting_registry = crafting_registry,
             .active_furnaces = .empty,
             .last_craft_key = false,
+            .weather = weather_mod.WeatherState.init(),
+            .movement = movement_mod.MovementState.init(),
+            .gamemode = gamemode_mod.GameModeManager.init(.survival),
+            .last_f1_press = false,
+            .last_space_press_time = 0.0,
+            .last_space_press = false,
         };
     }
 
@@ -288,8 +309,44 @@ pub const Engine = struct {
             );
             WaterBridge.engine_ctx = null;
 
-            // Jump / swim
-            if (self.window.handle.getKey(.space) == .press) {
+            // Update weather simulation
+            self.weather.update(dt);
+
+            // Update movement mode (sprint/sneak)
+            const ctrl_held = self.window.handle.getKey(.left_control) == .press or
+                self.window.handle.getKey(.right_control) == .press;
+            const shift_held = self.window.handle.getKey(.left_shift) == .press or
+                self.window.handle.getKey(.right_shift) == .press;
+            self.movement.updateInput(ctrl_held, shift_held, forward_input > 0, current_time, self.water_state.in_water);
+
+            // Game mode toggle: F1 switches between survival and creative
+            const f1_pressed = self.window.handle.getKey(.F1) == .press;
+            if (f1_pressed and !self.last_f1_press) {
+                const new_mode: gamemode_mod.GameMode = if (self.gamemode.current == .survival) .creative else .survival;
+                self.gamemode.setMode(new_mode);
+            }
+            self.last_f1_press = f1_pressed;
+
+            // Double-space toggles flight in creative mode
+            const space_pressed = self.window.handle.getKey(.space) == .press;
+            if (space_pressed and !self.last_space_press) {
+                const elapsed = current_time - self.last_space_press_time;
+                if (elapsed <= 0.3 and elapsed > 0.0) {
+                    self.gamemode.toggleFlight();
+                }
+                self.last_space_press_time = current_time;
+            }
+            self.last_space_press = space_pressed;
+
+            // Jump / swim / fly
+            if (self.gamemode.is_flying) {
+                self.player_vy = 0.0;
+                if (space_pressed) {
+                    self.player_vy = 6.0;
+                } else if (shift_held) {
+                    self.player_vy = -6.0;
+                }
+            } else if (space_pressed) {
                 if (self.water_state.in_water and !self.on_ground) {
                     self.player_vy = self.water_state.getSwimUpSpeed();
                 } else if (self.on_ground) {
@@ -332,7 +389,7 @@ pub const Engine = struct {
             // Horizontal movement based on camera direction
             const fwd = self.camera.forward();
             const rt = self.camera.right();
-            const speed: f32 = 6.0 * self.water_state.getSpeedMultiplier();
+            const speed: f32 = 6.0 * self.water_state.getSpeedMultiplier() * self.movement.getSpeedMultiplier();
             var move_x: f32 = 0;
             var move_z: f32 = 0;
 
@@ -342,9 +399,11 @@ pub const Engine = struct {
             move_x += rt[0] * right_input * speed * dt;
             move_z += rt[2] * right_input * speed * dt;
 
-            // Apply gravity (reduced in water)
-            const gravity: f32 = self.water_state.getGravity();
-            self.player_vy += gravity * dt;
+            // Apply gravity (reduced in water, disabled when flying)
+            if (!self.gamemode.is_flying) {
+                const gravity: f32 = self.water_state.getGravity();
+                self.player_vy += gravity * dt;
+            }
 
             // Track pre-collision velocity for fall damage
             const pre_land_vy = self.player_vy;
@@ -374,7 +433,8 @@ pub const Engine = struct {
             }
 
             // Fall damage: when landing (on_ground transitions false -> true)
-            if (self.on_ground and !was_on_ground and pre_land_vy < -10.0) {
+            // Only in game modes that take damage
+            if (self.gamemode.takesBlockDamage() and self.on_ground and !was_on_ground and pre_land_vy < -10.0) {
                 self.player_stats.takeDamage(@abs(pre_land_vy) - 10.0);
             }
 
@@ -440,7 +500,8 @@ pub const Engine = struct {
     /// Update camera, day/night cycle, chunk loading, and draw a frame.
     fn renderFrame(self: *Engine, dt: f32) void {
         const zm = @import("zmath");
-        self.camera.pos = zm.f32x4(self.player_x, self.player_y + PLAYER_EYE_HEIGHT, self.player_z, 1.0);
+        const cam_y = self.player_y + PLAYER_EYE_HEIGHT + self.movement.getCameraYOffset();
+        self.camera.pos = zm.f32x4(self.player_x, cam_y, self.player_z, 1.0);
         self.game_time.update(@as(f64, @floatCast(dt)));
         self.updateChunkLoading();
         const vp = self.camera.vpMatrix();
@@ -448,8 +509,14 @@ pub const Engine = struct {
 
         // Non-natural dimensions (nether, end) use fixed sky/fog instead of day/night cycle
         const dim_def = dimension_mod.getDef(self.current_dimension);
-        const sky_color = if (dim_def.natural) self.game_time.getSkyColor() else dim_def.sky_color;
+        var sky_color = if (dim_def.natural) self.game_time.getSkyColor() else dim_def.sky_color;
         const fog_color = if (dim_def.natural) self.game_time.getFogColor() else dim_def.fog_color;
+
+        // Weather darkening: reduce sky brightness during rain/thunder
+        const weather_factor = 1.0 - self.weather.getSkyDarkening();
+        sky_color[0] *= weather_factor;
+        sky_color[1] *= weather_factor;
+        sky_color[2] *= weather_factor;
 
         self.renderer.drawFrame(vp_arr, sky_color, fog_color) catch |err| {
             std.debug.print("Render error: {}\n", .{err});
@@ -620,9 +687,11 @@ pub const Engine = struct {
         ) orelse return;
 
         if (left_just_pressed) {
+            if (!self.gamemode.canBreak()) return;
             self.renderer.waitIdle();
             self.breakBlock(hit.bx, hit.by, hit.bz);
         } else if (right_just_pressed) {
+            if (!self.gamemode.canPlace()) return;
             const target_bid = self.getWorldBlock(hit.bx, hit.by, hit.bz) orelse block.AIR;
             if (target_bid == block.FURNACE) {
                 self.interactFurnace(hit.bx, hit.by, hit.bz);
@@ -1005,4 +1074,16 @@ test "crafting module" {
 
 test "furnace module" {
     _ = furnace_mod;
+}
+
+test "weather module" {
+    _ = weather_mod;
+}
+
+test "movement module" {
+    _ = movement_mod;
+}
+
+test "gamemode module" {
+    _ = gamemode_mod;
 }
