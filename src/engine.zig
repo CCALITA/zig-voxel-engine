@@ -39,6 +39,7 @@ pub const gamemode_mod = @import("gameplay/gamemode.zig");
 pub const breeding_mod = @import("gameplay/breeding.zig");
 pub const fishing_mod = @import("gameplay/fishing.zig");
 pub const command_mod = @import("gameplay/commands.zig");
+pub const block_interact = @import("world/block_interact.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -388,6 +389,17 @@ pub const Engine = struct {
                 } else if (self.on_ground) {
                     self.player_vy = 8.0; // jump impulse
                     self.on_ground = false;
+                }
+            }
+
+            // Ladder climbing: check if player's feet overlap a ladder block
+            const feet_bx = @as(i32, @intFromFloat(@floor(self.player_x)));
+            const feet_by = @as(i32, @intFromFloat(@floor(self.player_y)));
+            const feet_bz = @as(i32, @intFromFloat(@floor(self.player_z)));
+            if (self.getWorldBlock(feet_bx, feet_by, feet_bz)) |feet_block| {
+                if (feet_block == block.LADDER) {
+                    const is_sneaking = self.movement.mode == .sneak;
+                    self.player_vy = block_interact.getLadderClimbSpeed(forward_input > 0, is_sneaking);
                 }
             }
 
@@ -760,6 +772,16 @@ pub const Engine = struct {
         } else if (right_just_pressed) {
             if (!self.gamemode.canPlace()) return;
             const target_bid = self.getWorldBlock(hit.bx, hit.by, hit.bz) orelse block.AIR;
+
+            const interaction = block_interact.getInteraction(target_bid);
+            if (interaction != .none) {
+                const is_night = self.game_time.getPhase() == .night;
+                const result = block_interact.interact(target_bid, is_night);
+                if (result.set_time) |t| self.game_time.tick = t;
+                if (result.climb_speed) |spd| self.player_vy = spd;
+                return;
+            }
+
             if (target_bid == block.FURNACE) {
                 self.interactFurnace(hit.bx, hit.by, hit.bz);
             } else {
@@ -1213,6 +1235,11 @@ fn getBlockColor(block_id: block.BlockId) [3]f32 {
         block.SOUL_SAND => .{ 0.35, 0.28, 0.22 },
         block.LAVA => .{ 0.90, 0.40, 0.10 },
         block.FURNACE => .{ 0.50, 0.50, 0.50 },
+        block.DOOR => .{ 0.55, 0.40, 0.25 },
+        block.BED => .{ 0.60, 0.20, 0.20 },
+        block.LADDER => .{ 0.55, 0.40, 0.25 },
+        block.CHEST => .{ 0.55, 0.40, 0.20 },
+        block.TRAPDOOR => .{ 0.50, 0.38, 0.22 },
         else => .{ 0.50, 0.50, 0.50 },
     };
 }
@@ -1351,4 +1378,8 @@ test "fishing module" {
 
 test "command module" {
     _ = command_mod;
+}
+
+test "block_interact module" {
+    _ = block_interact;
 }
