@@ -25,10 +25,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/world/block.zig"),
         .target = target,
     });
-    const noise_mod = b.addModule("noise", .{
-        .root_source_file = b.path("src/world/noise.zig"),
-        .target = target,
-    });
     const chunk_mod = b.addModule("chunk", .{
         .root_source_file = b.path("src/world/chunk.zig"),
         .target = target,
@@ -101,32 +97,22 @@ pub fn build(b: *std.Build) void {
     });
     const run_physics_collision_tests = b.addRunArtifact(physics_collision_tests);
 
-    // Tree generation tests
+    // Tree generation tests (rooted at src/world/ for relative import resolution)
     const tree_gen_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/world/worldgen/trees.zig"),
+            .root_source_file = b.path("src/world/trees_test.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{
-                .{ .name = "block", .module = block_mod },
-                .{ .name = "chunk", .module = chunk_mod },
-                .{ .name = "noise", .module = noise_mod },
-            },
         }),
     });
     const run_tree_gen_tests = b.addRunArtifact(tree_gen_tests);
 
-    // Cave generation tests
+    // Cave generation tests (rooted at src/world/ for relative import resolution)
     const caves_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/world/worldgen/caves.zig"),
+            .root_source_file = b.path("src/world/caves_test.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{
-                .{ .name = "block", .module = block_mod },
-                .{ .name = "chunk", .module = chunk_mod },
-                .{ .name = "noise", .module = noise_mod },
-            },
         }),
     });
     const run_caves_tests = b.addRunArtifact(caves_tests);
