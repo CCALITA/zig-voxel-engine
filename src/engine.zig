@@ -40,6 +40,7 @@ pub const breeding_mod = @import("gameplay/breeding.zig");
 pub const fishing_mod = @import("gameplay/fishing.zig");
 pub const command_mod = @import("gameplay/commands.zig");
 pub const block_interact = @import("world/block_interact.zig");
+pub const scoreboard_mod = @import("gameplay/scoreboard.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -143,6 +144,9 @@ pub const Engine = struct {
     chat_open: bool,
     last_f_press: bool,
     last_t_press: bool,
+
+    // Scoreboard / stat tracking
+    stat_tracker: scoreboard_mod.StatTracker,
 
     const FurnaceEntry = struct {
         x: i32,
@@ -294,6 +298,7 @@ pub const Engine = struct {
             .chat_open = false,
             .last_f_press = false,
             .last_t_press = false,
+            .stat_tracker = scoreboard_mod.StatTracker.init(),
         };
     }
 
@@ -531,6 +536,7 @@ pub const Engine = struct {
                 const fall_damage = @abs(pre_land_vy) - 10.0;
                 const reduced = self.armor.getDamageReduction(fall_damage);
                 self.player_stats.takeDamage(fall_damage - reduced);
+                self.stat_tracker.increment(.damage_taken, 1);
             }
 
             // Update health/hunger
@@ -562,6 +568,10 @@ pub const Engine = struct {
 
             // Collect loot from newly dead mobs before removing them
             self.spawnMobLoot();
+            // Count mobs that died this frame for scoreboard
+            for (self.mob_manager.entities.items) |ent| {
+                if (!ent.alive) self.stat_tracker.increment(.mobs_killed, 1);
+            }
             self.mob_manager.removeDeadEntities();
 
             // Drowning damage
@@ -569,6 +579,7 @@ pub const Engine = struct {
             if (drown_dmg > 0) {
                 const drown_reduced = self.armor.getDamageReduction(drown_dmg);
                 self.player_stats.takeDamage(drown_dmg - drown_reduced);
+                self.stat_tracker.increment(.damage_taken, 1);
             }
 
             // Update item drops (physics, pickup, despawn)
@@ -582,6 +593,10 @@ pub const Engine = struct {
 
             // Update particle simulation
             self.particle_manager.update(dt);
+
+            // Scoreboard: track distance walked/sprinted and play time
+            self.stat_tracker.addDistance(move_x, move_z, self.movement.mode == .sprint);
+            self.stat_tracker.addPlayTime(dt);
 
             self.renderFrame(dt);
         }
@@ -1100,6 +1115,9 @@ pub const Engine = struct {
         const old_block = self.getWorldBlock(wx, wy, wz) orelse return;
         if (!self.setWorldBlock(wx, wy, wz, block.AIR)) return;
 
+        // Scoreboard: track block mined
+        self.stat_tracker.increment(.blocks_mined, 1);
+
         // Achievement: first block break
         _ = self.achievements.unlock(.mine_wood);
 
@@ -1167,6 +1185,10 @@ pub const Engine = struct {
             block.STONE;
 
         if (!self.setWorldBlock(wx, wy, wz, block_id)) return;
+
+        // Scoreboard: track block placed
+        self.stat_tracker.increment(.blocks_placed, 1);
+
         self.remeshAffectedChunks(wx, wz);
     }
 
@@ -1464,4 +1486,8 @@ test "command module" {
 
 test "block_interact module" {
     _ = block_interact;
+}
+
+test "scoreboard module" {
+    _ = scoreboard_mod;
 }
