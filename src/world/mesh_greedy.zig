@@ -5,6 +5,8 @@ const std = @import("std");
 const block = @import("block.zig");
 const Chunk = @import("chunk.zig");
 const mesh_indexed = @import("mesh_indexed.zig");
+const ao_mod = @import("ao.zig");
+const light_mod = @import("light.zig");
 
 pub const Vertex = mesh_indexed.Vertex;
 
@@ -97,6 +99,9 @@ pub fn generateMesh(allocator: std.mem.Allocator, chunk: *const Chunk, neighbors
     var indices: std.ArrayList(u32) = .empty;
     errdefer indices.deinit(allocator);
 
+    // Pre-compute lighting for the entire chunk.
+    const light_map = light_mod.computeFullLighting(chunk);
+
     var mask: [SIZE][SIZE]MaskEntry = undefined;
 
     for (0..6) |face_idx| {
@@ -165,6 +170,18 @@ pub fn generateMesh(allocator: std.mem.Allocator, chunk: *const Chunk, neighbors
                         }
                     }
 
+                    // First block position of the merged quad (AO + light source).
+                    var first_pos: [3]u4 = undefined;
+                    first_pos[am.u_axis] = @intCast(ui);
+                    first_pos[am.v_axis] = @intCast(vi);
+                    first_pos[am.slice_axis] = @intCast(slice);
+                    const bx = first_pos[0];
+                    const by = first_pos[1];
+                    const bz = first_pos[2];
+
+                    const face_ao = ao_mod.computeFaceAO(chunk, bx, by, bz, @intCast(face_idx));
+                    const block_light = light_map.getCombinedLight(bx, by, bz);
+
                     // Emit quad.
                     const tex: u6 = @intCast(entry - 1); // undo the +1
                     const base: u32 = @intCast(vertices.items.len);
@@ -184,8 +201,8 @@ pub fn generateMesh(allocator: std.mem.Allocator, chunk: *const Chunk, neighbors
                             .z = pos[2],
                             .face = @intCast(face_idx),
                             .corner = @intCast(ci),
-                            .ao = 0,
-                            .light = 0,
+                            .ao = face_ao.corners[ci],
+                            .light = block_light,
                             .tex = tex,
                         });
                     }
