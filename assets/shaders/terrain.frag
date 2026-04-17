@@ -3,6 +3,14 @@
 layout(location = 0) in vec2 frag_uv;
 layout(location = 1) in flat uint frag_tex;
 layout(location = 2) in float frag_shade;
+layout(location = 3) in float frag_dist;
+
+layout(push_constant) uniform PushConstants {
+    mat4 mvp;
+    vec3 fog_color;
+    float fog_start;
+    float fog_end;
+} pc;
 
 layout(location = 0) out vec4 out_color;
 
@@ -27,5 +35,10 @@ const vec3 block_colors[13] = vec3[13](
 void main() {
     uint idx = min(frag_tex, 12u);
     vec3 color = block_colors[idx] * frag_shade;
+
+    // Distance fog
+    float fog_factor = clamp((frag_dist - pc.fog_start) / (pc.fog_end - pc.fog_start), 0.0, 1.0);
+    color = mix(color, pc.fog_color, fog_factor);
+
     out_color = vec4(color, 1.0);
 }

@@ -15,6 +15,7 @@ pub const noise = @import("world/noise.zig");
 pub const chunk_map = @import("world/chunk_map.zig");
 pub const raycast = @import("gameplay/raycast.zig");
 pub const inventory_mod = @import("gameplay/inventory.zig");
+pub const time_mod = @import("world/time.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -49,6 +50,9 @@ pub const Engine = struct {
     last_left_click: bool,
     last_right_click: bool,
     inventory: inventory_mod.Inventory,
+
+    // Day/night cycle
+    game_time: time_mod.GameTime,
 
     const ChunkKey = struct { x: i32, z: i32 };
 
@@ -148,6 +152,7 @@ pub const Engine = struct {
             .last_left_click = false,
             .last_right_click = false,
             .inventory = inventory,
+            .game_time = .{},
         };
     }
 
@@ -252,11 +257,14 @@ pub const Engine = struct {
             const zm = @import("zmath");
             self.camera.pos = zm.f32x4(self.player_x, self.player_y + 1.6, self.player_z, 1.0);
 
+            // Update day/night cycle
+            self.game_time.update(@as(f64, @floatCast(dt)));
+
             // Compute VP matrix
             const vp = self.camera.vpMatrix();
             const vp_arr = Camera.matToArray(vp);
 
-            self.renderer.drawFrame(vp_arr) catch |err| {
+            self.renderer.drawFrame(vp_arr, self.game_time.getSkyColor(), self.game_time.getFogColor()) catch |err| {
                 std.debug.print("Render error: {}\n", .{err});
                 return;
             };
@@ -501,4 +509,8 @@ test "raycast module" {
 
 test "inventory module" {
     _ = inventory_mod;
+}
+
+test "time module" {
+    _ = time_mod;
 }

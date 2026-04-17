@@ -19,6 +19,7 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) out vec2 frag_uv;
 layout(location = 1) out flat uint frag_tex;
 layout(location = 2) out float frag_shade;
+layout(location = 3) out float frag_dist;
 
 // Face shading (simple directional light)
 const float face_shade[6] = float[6](
@@ -50,6 +51,9 @@ void main() {
 
     vec3 pos = vec3(float(x), float(y), float(z));
     gl_Position = pc.mvp * vec4(pos, 1.0);
+
+    // Pass view-space depth to fragment shader for fog calculation
+    frag_dist = gl_Position.w;
 
     frag_uv = corner_uvs[corner];
     frag_tex = tex;

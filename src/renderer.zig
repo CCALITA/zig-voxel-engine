@@ -85,6 +85,10 @@ depth_image_memory: vk.DeviceMemory,
 // Current VP matrix (set each frame; per-chunk model applied in recordCommandBuffer)
 current_vp: [4][4]f32,
 
+// Sky and fog colors (set each frame from GameTime)
+current_sky_color: [3]f32,
+current_fog_color: [3]f32,
+
 pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     var self: Self = undefined;
     self.allocator = allocator;
@@ -157,6 +161,8 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     // Initialize per-chunk render data list
     self.chunk_renders = std.ArrayList(ChunkRenderData).empty;
     self.current_vp = std.mem.zeroes([4][4]f32);
+    self.current_sky_color = .{ 0.53, 0.81, 0.92 };
+    self.current_fog_color = .{ 0.60, 0.82, 0.90 };
 
     return self;
 }
@@ -178,8 +184,10 @@ pub fn deinit(self: *Self) void {
     self.vki.destroyInstance(self.instance, null);
 }
 
-pub fn drawFrame(self: *Self, vp: [4][4]f32) !void {
+pub fn drawFrame(self: *Self, vp: [4][4]f32, sky_color: [3]f32, fog_color: [3]f32) !void {
     self.current_vp = vp;
+    self.current_sky_color = sky_color;
+    self.current_fog_color = fog_color;
     const frame = self.current_frame;
 
     // Wait for previous frame's fence
@@ -680,9 +688,9 @@ fn destroySyncObjects(self: *Self) void {
 fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !void {
     try self.vkd.beginCommandBuffer(cmd, &.{});
 
-    // Clear values: color (sky blue) and depth
+    // Clear values: color (dynamic sky color from day/night cycle) and depth
     const clear_values = [_]vk.ClearValue{
-        .{ .color = .{ .float_32 = .{ 0.53, 0.81, 0.92, 1.0 } } },
+        .{ .color = .{ .float_32 = .{ self.current_sky_color[0], self.current_sky_color[1], self.current_sky_color[2], 1.0 } } },
         .{ .depth_stencil = .{ .depth = 1.0, .stencil = 0 } },
     };
 
@@ -734,11 +742,16 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
 
             // MVP = model * VP (row-vector convention: v * model * VP)
             const mvp = mat4Mul(model, self.current_vp);
-            const push = pipeline_mod.PushConstants{ .mvp = mvp };
+            const push = pipeline_mod.PushConstants{
+                .mvp = mvp,
+                .fog_color = self.current_fog_color,
+                .fog_start = 60.0,
+                .fog_end = 80.0,
+            };
             self.vkd.cmdPushConstants(
                 cmd,
                 self.terrain_pipeline_layout,
-                .{ .vertex_bit = true },
+                .{ .vertex_bit = true, .fragment_bit = true },
                 0,
                 @sizeOf(pipeline_mod.PushConstants),
                 @ptrCast(&push),

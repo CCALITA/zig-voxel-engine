@@ -4,6 +4,10 @@ const vk = @import("vulkan");
 
 pub const PushConstants = extern struct {
     mvp: [4][4]f32,
+    fog_color: [3]f32,
+    fog_start: f32,
+    fog_end: f32,
+    _padding: [3]f32 = .{ 0, 0, 0 },
 };
 
 pub fn create(
@@ -122,9 +126,9 @@ pub fn create(
         .blend_constants = .{ 0.0, 0.0, 0.0, 0.0 },
     };
 
-    // Push constant range for MVP matrix
+    // Push constant range for MVP matrix and fog parameters
     const push_range = [_]vk.PushConstantRange{.{
-        .stage_flags = .{ .vertex_bit = true },
+        .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
         .offset = 0,
         .size = @sizeOf(PushConstants),
     }};
