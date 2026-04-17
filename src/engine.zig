@@ -18,6 +18,7 @@ pub const chunk_map = @import("world/chunk_map.zig");
 pub const chunk_loader_mod = @import("world/chunk_loader.zig");
 pub const raycast = @import("gameplay/raycast.zig");
 pub const inventory_mod = @import("gameplay/inventory.zig");
+pub const item_drop_mod = @import("gameplay/item_drop.zig");
 pub const time_mod = @import("world/time.zig");
 
 const SEED: u64 = 42;
@@ -54,6 +55,9 @@ pub const Engine = struct {
     last_left_click: bool,
     last_right_click: bool,
     inventory: inventory_mod.Inventory,
+
+    // Item drops
+    drop_manager: item_drop_mod.ItemDropManager,
 
     // Day/night cycle
     game_time: time_mod.GameTime,
@@ -149,11 +153,13 @@ pub const Engine = struct {
             .last_left_click = false,
             .last_right_click = false,
             .inventory = inventory,
+            .drop_manager = item_drop_mod.ItemDropManager.init(allocator),
             .game_time = .{},
         };
     }
 
     pub fn deinit(self: *Engine) void {
+        self.drop_manager.deinit();
         self.renderer.deinit();
         self.window.deinit();
         self.chunks.deinit();
@@ -257,6 +263,15 @@ pub const Engine = struct {
 
             // Update day/night cycle
             self.game_time.update(@as(f64, @floatCast(dt)));
+
+            // Update item drops: physics, pickup, despawn
+            if (self.drop_manager.update(dt, self.player_x, self.player_y, self.player_z)) |picked_up| {
+                for (picked_up) |drop| {
+                    _ = self.inventory.addItem(drop.item_id, drop.count);
+                }
+                self.allocator.free(picked_up);
+            } else |_| {}
+            self.drop_manager.cleanup();
 
             self.updateChunkLoading();
 
@@ -427,7 +442,16 @@ pub const Engine = struct {
     }
 
     fn breakBlock(self: *Engine, wx: i32, wy: i32, wz: i32) void {
+        const old_block_id = self.getWorldBlock(wx, wy, wz) orelse return;
+        if (old_block_id == block.AIR) return;
+
         if (!self.setWorldBlock(wx, wy, wz, block.AIR)) return;
+
+        const fx: f32 = @as(f32, @floatFromInt(wx)) + 0.5;
+        const fy: f32 = @as(f32, @floatFromInt(wy)) + 0.5;
+        const fz: f32 = @as(f32, @floatFromInt(wz)) + 0.5;
+        self.drop_manager.spawnDrop(fx, fy, fz, @as(u16, old_block_id), 1) catch return;
+
         self.remeshAffectedChunks(wx, wz);
     }
 
@@ -618,6 +642,10 @@ test "raycast module" {
 
 test "inventory module" {
     _ = inventory_mod;
+}
+
+test "item_drop module" {
+    _ = item_drop_mod;
 }
 
 test "time module" {
