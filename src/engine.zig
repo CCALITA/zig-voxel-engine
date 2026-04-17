@@ -23,6 +23,8 @@ pub const mob_mod = @import("entity/mob.zig");
 pub const entity_mod = @import("entity/entity.zig");
 pub const health_mod = @import("gameplay/health.zig");
 pub const water_mod = @import("physics/water.zig");
+pub const persistence_mod = @import("world/persistence.zig");
+pub const item_drop_mod = @import("gameplay/item_drop.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -69,6 +71,12 @@ pub const Engine = struct {
     // Health and water physics
     player_stats: health_mod.PlayerStats,
     water_state: water_mod.WaterState,
+
+    // Persistence (save/load)
+    persistence: persistence_mod.WorldPersistence,
+
+    // Item drops
+    drop_manager: item_drop_mod.ItemDropManager,
 
     const ChunkKey = struct { x: i32, z: i32 };
 
@@ -144,6 +152,12 @@ pub const Engine = struct {
         // Initialize mob manager and spawn initial mobs
         var mob_manager = mob_mod.MobManager.init(allocator);
 
+        // Initialize persistence
+        const persistence = try persistence_mod.WorldPersistence.init(allocator, "default");
+
+        // Initialize item drop manager
+        const drop_manager = item_drop_mod.ItemDropManager.init(allocator);
+
         // Spawn some passive mobs near the player
         const spawn_types = [_]entity_mod.EntityType{ .pig, .cow, .sheep, .chicken };
         for (spawn_types) |mob_type| {
@@ -178,10 +192,15 @@ pub const Engine = struct {
             .mob_manager = mob_manager,
             .player_stats = health_mod.PlayerStats.init(),
             .water_state = water_mod.WaterState.init(),
+            .persistence = persistence,
+            .drop_manager = drop_manager,
         };
     }
 
     pub fn deinit(self: *Engine) void {
+        _ = self.persistence.saveAllDirtyColumns(&self.chunks) catch 0;
+        self.persistence.deinit();
+        self.drop_manager.deinit();
         self.mob_manager.deinit();
         self.renderer.deinit();
         self.window.deinit();
@@ -323,6 +342,15 @@ pub const Engine = struct {
                 self.player_stats.takeDamage(drown_dmg);
             }
 
+            // Update item drops (physics, pickup, despawn)
+            if (self.drop_manager.update(dt, self.player_x, self.player_y, self.player_z)) |picked_up| {
+                defer self.allocator.free(picked_up);
+                for (picked_up) |drop| {
+                    _ = self.inventory.addItem(drop.item_id, drop.count);
+                }
+            } else |_| {}
+            self.drop_manager.cleanup();
+
             self.renderFrame(dt);
         }
 
@@ -361,7 +389,11 @@ pub const Engine = struct {
     }
 
     fn loadChunk(self: *Engine, cx: i32, cz: i32) void {
-        const column = terrain_gen.generateColumn(self.allocator, SEED, cx, cz);
+        // Try loading from disk first; fall back to terrain generation
+        const column = if (self.persistence.loadColumn(cx, cz) catch null) |saved_col|
+            saved_col
+        else
+            terrain_gen.generateColumn(self.allocator, SEED, cx, cz);
         self.chunks.put(.{ .x = cx, .z = cz }, column) catch return;
         self.meshAndUploadColumn(cx, cz);
         self.chunk_loader.markLoaded(.{ .x = cx, .z = cz }) catch return;
@@ -443,6 +475,7 @@ pub const Engine = struct {
         const lx: u4 = @intCast(@mod(wx, @as(i32, Chunk.SIZE)));
         const lz: u4 = @intCast(@mod(wz, @as(i32, Chunk.SIZE)));
         col_ptr.setBlock(lx, @intCast(wy), lz, id);
+        self.persistence.markDirty(cx, cz) catch {};
         return true;
     }
 
@@ -508,7 +541,18 @@ pub const Engine = struct {
     }
 
     fn breakBlock(self: *Engine, wx: i32, wy: i32, wz: i32) void {
+        // Read old block before replacing with air
+        const old_block = self.getWorldBlock(wx, wy, wz) orelse return;
         if (!self.setWorldBlock(wx, wy, wz, block.AIR)) return;
+
+        // Spawn an item drop if the block was not air
+        if (old_block != block.AIR) {
+            const fx: f32 = @as(f32, @floatFromInt(wx)) + 0.5;
+            const fy: f32 = @as(f32, @floatFromInt(wy)) + 0.5;
+            const fz: f32 = @as(f32, @floatFromInt(wz)) + 0.5;
+            self.drop_manager.spawnDrop(fx, fy, fz, @as(u16, old_block), 1) catch {};
+        }
+
         self.remeshAffectedChunks(wx, wz);
     }
 
@@ -723,4 +767,12 @@ test "health module" {
 
 test "water module" {
     _ = water_mod;
+}
+
+test "persistence module" {
+    _ = persistence_mod;
+}
+
+test "item_drop module" {
+    _ = item_drop_mod;
 }

@@ -27,15 +27,17 @@ pub const DroppedItem = struct {
 
 pub const ItemDropManager = struct {
     drops: std.ArrayList(DroppedItem),
+    allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) ItemDropManager {
         return .{
-            .drops = std.ArrayList(DroppedItem).init(allocator),
+            .drops = .empty,
+            .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *ItemDropManager) void {
-        self.drops.deinit();
+        self.drops.deinit(self.allocator);
     }
 
     /// Spawn a dropped item at position with a small random velocity spread.
@@ -47,7 +49,7 @@ pub const ItemDropManager = struct {
         const vx = @cos(angle) * SPAWN_SPEED;
         const vz = @sin(angle) * SPAWN_SPEED;
 
-        try self.drops.append(.{
+        try self.drops.append(self.allocator, .{
             .x = x,
             .y = y,
             .z = z,
@@ -72,8 +74,8 @@ pub const ItemDropManager = struct {
         player_y: f32,
         player_z: f32,
     ) ![]DroppedItem {
-        var picked_up = std.ArrayList(DroppedItem).init(self.drops.allocator);
-        errdefer picked_up.deinit();
+        var picked_up: std.ArrayList(DroppedItem) = .empty;
+        errdefer picked_up.deinit(self.allocator);
 
         for (self.drops.items) |*drop| {
             if (!drop.active) continue;
@@ -110,13 +112,13 @@ pub const ItemDropManager = struct {
                 const dz = drop.z - player_z;
                 const dist_sq = dx * dx + dy * dy + dz * dz;
                 if (dist_sq <= PICKUP_RANGE * PICKUP_RANGE) {
-                    try picked_up.append(drop.*);
+                    try picked_up.append(self.allocator, drop.*);
                     drop.active = false;
                 }
             }
         }
 
-        return picked_up.toOwnedSlice();
+        return picked_up.toOwnedSlice(self.allocator);
     }
 
     /// Remove inactive items from the list, preserving order of remaining items.
