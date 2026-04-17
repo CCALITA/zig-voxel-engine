@@ -117,10 +117,36 @@ pub fn build(b: *std.Build) void {
     });
     const run_caves_tests = b.addRunArtifact(caves_tests);
 
+    // Redstone tests
+    const redstone_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/redstone/redstone.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "block", .module = block_mod },
+                .{ .name = "chunk", .module = chunk_mod },
+            },
+        }),
+    });
+    const run_redstone_tests = b.addRunArtifact(redstone_tests);
+
+    // Redstone component tests
+    const redstone_component_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/redstone/components.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_redstone_component_tests = b.addRunArtifact(redstone_component_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_physics_collision_tests.step);
     test_step.dependOn(&run_tree_gen_tests.step);
     test_step.dependOn(&run_caves_tests.step);
+    test_step.dependOn(&run_redstone_tests.step);
+    test_step.dependOn(&run_redstone_component_tests.step);
 }
