@@ -8,6 +8,7 @@ pub const Camera = @import("camera.zig");
 pub const pipeline = @import("pipeline.zig");
 pub const block = @import("world/block.zig");
 pub const Chunk = @import("world/chunk.zig");
+pub const ChunkColumn = @import("world/chunk_column.zig");
 pub const mesh_indexed = @import("world/mesh_indexed.zig");
 pub const mesh = @import("world/mesh.zig");
 pub const terrain_gen = @import("world/terrain_gen.zig");
@@ -35,7 +36,7 @@ pub const Engine = struct {
     first_mouse: bool,
 
     // World chunks stored for collision
-    chunks: std.AutoHashMap(ChunkKey, Chunk),
+    chunks: std.AutoHashMap(ChunkKey, ChunkColumn),
 
     // Player physics
     player_x: f32,
@@ -63,52 +64,40 @@ pub const Engine = struct {
 
         var renderer = try Renderer.init(allocator, window.handle);
 
-        // Generate all chunks first
-        var chunks = std.AutoHashMap(ChunkKey, Chunk).init(allocator);
+        // Generate all chunk columns first
+        var chunks = std.AutoHashMap(ChunkKey, ChunkColumn).init(allocator);
         var cx: i32 = -RENDER_RADIUS;
         while (cx <= RENDER_RADIUS) : (cx += 1) {
             var cz: i32 = -RENDER_RADIUS;
             while (cz <= RENDER_RADIUS) : (cz += 1) {
-                const chunk = terrain_gen.generateChunk(allocator, SEED, cx, cz);
-                try chunks.put(.{ .x = cx, .z = cz }, chunk);
+                const column = terrain_gen.generateColumn(allocator, SEED, cx, cz);
+                try chunks.put(.{ .x = cx, .z = cz }, column);
             }
         }
 
-        // Mesh each chunk with neighbor data for seamless borders
+        // Mesh each column's sections with neighbor data for seamless borders
         cx = -RENDER_RADIUS;
         while (cx <= RENDER_RADIUS) : (cx += 1) {
             var cz: i32 = -RENDER_RADIUS;
             while (cz <= RENDER_RADIUS) : (cz += 1) {
-                const chunk_ptr = chunks.getPtr(.{ .x = cx, .z = cz }).?;
-
-                const neighbors = mesh_indexed.NeighborChunks{
-                    .north = if (chunks.getPtr(.{ .x = cx, .z = cz - 1 })) |p| p else null,
-                    .south = if (chunks.getPtr(.{ .x = cx, .z = cz + 1 })) |p| p else null,
-                    .east = if (chunks.getPtr(.{ .x = cx + 1, .z = cz })) |p| p else null,
-                    .west = if (chunks.getPtr(.{ .x = cx - 1, .z = cz })) |p| p else null,
-                };
-
-                var mesh_data = try mesh_indexed.generateMeshWithNeighbors(allocator, chunk_ptr, neighbors);
-                defer mesh_data.deinit();
+                const col_ptr = chunks.getPtr(.{ .x = cx, .z = cz }).?;
+                const north_col = chunks.getPtr(.{ .x = cx, .z = cz - 1 });
+                const south_col = chunks.getPtr(.{ .x = cx, .z = cz + 1 });
+                const east_col = chunks.getPtr(.{ .x = cx + 1, .z = cz });
+                const west_col = chunks.getPtr(.{ .x = cx - 1, .z = cz });
 
                 const world_x = cx * @as(i32, Chunk.SIZE);
                 const world_z = cz * @as(i32, Chunk.SIZE);
-                try renderer.uploadChunk(mesh_data.vertices, mesh_data.indices, world_x, 0, world_z);
+
+                try meshColumnSections(allocator, &renderer, col_ptr, north_col, south_col, east_col, west_col, world_x, world_z);
             }
         }
 
         // Find spawn height at world center
-        const center_chunk = chunks.get(.{ .x = 0, .z = 0 }).?;
-        var spawn_y: f32 = 15;
-        while (spawn_y > 0) {
-            const by: u4 = @intFromFloat(spawn_y);
-            if (block.isSolid(center_chunk.getBlock(8, by, 8))) {
-                spawn_y += 1;
-                break;
-            }
-            spawn_y -= 1;
-        }
-        spawn_y += 0.5; // half-block above ground
+        const center_column = chunks.getPtr(.{ .x = 0, .z = 0 }).?;
+        const spawn_height = center_column.getHeight(8, 8);
+        var spawn_y: f32 = @floatFromInt(spawn_height);
+        spawn_y += 1.5; // stand above the highest block
 
         const aspect = 1280.0 / 720.0;
 
@@ -298,25 +287,23 @@ pub const Engine = struct {
     }
 
     fn getWorldBlock(self: *Engine, wx: i32, wy: i32, wz: i32) ?block.BlockId {
-        if (wy < 0 or wy >= Chunk.SIZE) return null;
+        if (wy < 0 or wy >= ChunkColumn.HEIGHT) return null;
         const cx = @divFloor(wx, @as(i32, Chunk.SIZE));
         const cz = @divFloor(wz, @as(i32, Chunk.SIZE));
-        const chunk = self.chunks.get(.{ .x = cx, .z = cz }) orelse return null;
+        const column = self.chunks.getPtr(.{ .x = cx, .z = cz }) orelse return null;
         const lx: u4 = @intCast(@mod(wx, @as(i32, Chunk.SIZE)));
-        const ly: u4 = @intCast(@mod(wy, @as(i32, Chunk.SIZE)));
         const lz: u4 = @intCast(@mod(wz, @as(i32, Chunk.SIZE)));
-        return chunk.getBlock(lx, ly, lz);
+        return column.getBlock(lx, @intCast(wy), lz);
     }
 
     fn setWorldBlock(self: *Engine, wx: i32, wy: i32, wz: i32, id: block.BlockId) bool {
-        if (wy < 0 or wy >= Chunk.SIZE) return false;
+        if (wy < 0 or wy >= ChunkColumn.HEIGHT) return false;
         const cx = @divFloor(wx, @as(i32, Chunk.SIZE));
         const cz = @divFloor(wz, @as(i32, Chunk.SIZE));
-        const chunk_ptr = self.chunks.getPtr(.{ .x = cx, .z = cz }) orelse return false;
+        const col_ptr = self.chunks.getPtr(.{ .x = cx, .z = cz }) orelse return false;
         const lx: u4 = @intCast(@mod(wx, @as(i32, Chunk.SIZE)));
-        const ly: u4 = @intCast(@mod(wy, @as(i32, Chunk.SIZE)));
         const lz: u4 = @intCast(@mod(wz, @as(i32, Chunk.SIZE)));
-        chunk_ptr.setBlock(lx, ly, lz, id);
+        col_ptr.setBlock(lx, @intCast(wy), lz, id);
         return true;
     }
 
@@ -423,26 +410,24 @@ pub const Engine = struct {
     }
 
     fn remeshChunkByKey(self: *Engine, cx: i32, cz: i32) void {
-        const chunk_ptr = self.chunks.getPtr(.{ .x = cx, .z = cz }) orelse return;
+        const col_ptr = self.chunks.getPtr(.{ .x = cx, .z = cz }) orelse return;
 
-        const neighbors = mesh_indexed.NeighborChunks{
-            .north = if (self.chunks.getPtr(.{ .x = cx, .z = cz - 1 })) |p| p else null,
-            .south = if (self.chunks.getPtr(.{ .x = cx, .z = cz + 1 })) |p| p else null,
-            .east = if (self.chunks.getPtr(.{ .x = cx + 1, .z = cz })) |p| p else null,
-            .west = if (self.chunks.getPtr(.{ .x = cx - 1, .z = cz })) |p| p else null,
-        };
-
-        var mesh_data = mesh_indexed.generateMeshWithNeighbors(self.allocator, chunk_ptr, neighbors) catch return;
-        defer mesh_data.deinit();
+        const north_col = self.chunks.getPtr(.{ .x = cx, .z = cz - 1 });
+        const south_col = self.chunks.getPtr(.{ .x = cx, .z = cz + 1 });
+        const east_col = self.chunks.getPtr(.{ .x = cx + 1, .z = cz });
+        const west_col = self.chunks.getPtr(.{ .x = cx - 1, .z = cz });
 
         const world_x = cx * @as(i32, Chunk.SIZE);
         const world_z = cz * @as(i32, Chunk.SIZE);
 
-        // Remove old chunk render data for this chunk
-        self.removeChunkRender(world_x, 0, world_z);
+        // Remove all existing section renders for this column
+        for (0..ChunkColumn.SECTIONS) |si| {
+            const section_y: i32 = @as(i32, @intCast(si)) * @as(i32, Chunk.SIZE);
+            self.removeChunkRender(world_x, section_y, world_z);
+        }
 
-        // Upload new mesh (skip if empty -- chunk is now all air)
-        self.renderer.uploadChunk(mesh_data.vertices, mesh_data.indices, world_x, 0, world_z) catch return;
+        // Re-mesh all sections
+        meshColumnSections(self.allocator, &self.renderer, col_ptr, north_col, south_col, east_col, west_col, world_x, world_z) catch return;
     }
 
     fn removeChunkRender(self: *Engine, world_x: i32, world_y: i32, world_z: i32) void {
@@ -463,6 +448,58 @@ pub const Engine = struct {
     }
 };
 
+/// Mesh all non-null sections of a column and upload them to the renderer.
+/// Each section is meshed with its vertical and horizontal neighbors.
+fn meshColumnSections(
+    allocator: std.mem.Allocator,
+    renderer: *Renderer,
+    col: *ChunkColumn,
+    north_col: ?*ChunkColumn,
+    south_col: ?*ChunkColumn,
+    east_col: ?*ChunkColumn,
+    west_col: ?*ChunkColumn,
+    world_x: i32,
+    world_z: i32,
+) !void {
+    for (0..ChunkColumn.SECTIONS) |si| {
+        const section_idx: u4 = @intCast(si);
+        const section_ptr = col.getSection(section_idx) orelse continue;
+
+        // Vertical neighbors from the same column
+        const top_section: ?*const Chunk = if (si < ChunkColumn.SECTIONS - 1)
+            col.getSection(@intCast(si + 1))
+        else
+            null;
+        const bottom_section: ?*const Chunk = if (si > 0)
+            col.getSection(@intCast(si - 1))
+        else
+            null;
+
+        // Horizontal neighbors: same section index from adjacent columns
+        const north_section: ?*const Chunk = if (north_col) |nc| nc.getSection(section_idx) else null;
+        const south_section: ?*const Chunk = if (south_col) |sc| sc.getSection(section_idx) else null;
+        const east_section: ?*const Chunk = if (east_col) |ec| ec.getSection(section_idx) else null;
+        const west_section: ?*const Chunk = if (west_col) |wc| wc.getSection(section_idx) else null;
+
+        const neighbors = mesh_indexed.NeighborChunks{
+            .north = north_section,
+            .south = south_section,
+            .east = east_section,
+            .west = west_section,
+            .top = top_section,
+            .bottom = bottom_section,
+        };
+
+        var mesh_data = try mesh_indexed.generateMeshWithNeighbors(allocator, section_ptr, neighbors);
+        defer mesh_data.deinit();
+
+        if (mesh_data.vertices.len == 0) continue;
+
+        const section_y: i32 = @as(i32, @intCast(si)) * @as(i32, Chunk.SIZE);
+        try renderer.uploadChunk(mesh_data.vertices, mesh_data.indices, world_x, section_y, world_z);
+    }
+}
+
 test "subsystem count" {
     // Removed — no longer relevant with dynamic chunk count
 }
@@ -473,6 +510,10 @@ test "block module" {
 
 test "chunk module" {
     _ = Chunk;
+}
+
+test "chunk_column module" {
+    _ = ChunkColumn;
 }
 
 test "mesh module" {
