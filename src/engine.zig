@@ -29,6 +29,10 @@ pub const persistence_mod = @import("world/persistence.zig");
 pub const item_drop_mod = @import("gameplay/item_drop.zig");
 pub const crafting_mod = @import("gameplay/crafting.zig");
 pub const furnace_mod = @import("gameplay/furnace.zig");
+pub const breeding_mod = @import("gameplay/breeding.zig");
+pub const fishing_mod = @import("gameplay/fishing.zig");
+pub const command_mod = @import("gameplay/commands.zig");
+pub const xp_mod = @import("gameplay/experience.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -91,6 +95,16 @@ pub const Engine = struct {
     crafting_registry: crafting_mod.CraftingRegistry,
     active_furnaces: std.ArrayList(FurnaceEntry),
     last_craft_key: bool,
+
+    // Breeding, fishing, and command systems
+    breeding: breeding_mod.BreedingManager,
+    fishing: fishing_mod.FishingState,
+    xp: xp_mod.ExperienceTracker,
+    command_buffer: [256]u8,
+    command_len: u8,
+    chat_open: bool,
+    last_f_press: bool,
+    last_t_press: bool,
 
     const FurnaceEntry = struct {
         x: i32,
@@ -225,6 +239,14 @@ pub const Engine = struct {
             .crafting_registry = crafting_registry,
             .active_furnaces = .empty,
             .last_craft_key = false,
+            .breeding = breeding_mod.BreedingManager.init(allocator),
+            .fishing = fishing_mod.FishingState.init(),
+            .xp = xp_mod.ExperienceTracker.init(),
+            .command_buffer = [_]u8{0} ** 256,
+            .command_len = 0,
+            .chat_open = false,
+            .last_f_press = false,
+            .last_t_press = false,
         };
     }
 
@@ -233,6 +255,7 @@ pub const Engine = struct {
         self.persistence.deinit();
         self.drop_manager.deinit();
         self.mob_manager.deinit();
+        self.breeding.deinit();
         self.crafting_registry.deinit(self.allocator);
         self.active_furnaces.deinit(self.allocator);
         self.renderer.deinit();
@@ -328,6 +351,36 @@ pub const Engine = struct {
             for (self.active_furnaces.items) |*entry| {
                 entry.state.update(dt);
             }
+
+            // Breeding: tick pending entries and spawn babies
+            const breed_ready = self.breeding.update(dt);
+            for (breed_ready) |entry| {
+                const etype: entity_mod.EntityType = switch (entry.entity_type) {
+                    .pig => .pig,
+                    .cow => .cow,
+                    .chicken => .chicken,
+                    .sheep => .sheep,
+                };
+                self.mob_manager.spawn(etype, entry.spawn_x, entry.spawn_y, entry.spawn_z) catch {};
+            }
+
+            // Fishing: F key casts/reels fishing rod
+            const f_pressed = self.window.handle.getKey(.f) == .press;
+            if (f_pressed and !self.last_f_press and !self.chat_open) {
+                if (self.fishing.phase == .idle) {
+                    self.fishing.cast(self.player_x, self.player_y, self.player_z);
+                } else {
+                    if (self.fishing.reel()) |catch_result| {
+                        _ = self.inventory.addItem(catch_result.item_id, catch_result.count);
+                        self.xp.addXP(catch_result.xp);
+                    }
+                }
+            }
+            self.last_f_press = f_pressed;
+            self.fishing.update(dt);
+
+            // Chat/commands: T opens chat, Escape closes, Enter executes
+            self.handleChatInput();
 
             // Horizontal movement based on camera direction
             const fwd = self.camera.forward();
@@ -648,6 +701,107 @@ pub const Engine = struct {
                 _ = self.inventory.addItem(recipe.result_item, recipe.result_count);
                 return;
             }
+        }
+    }
+
+    /// Handle chat mode toggling (T to open, Escape to close, Enter to execute).
+    fn handleChatInput(self: *Engine) void {
+        const t_pressed = self.window.handle.getKey(.t) == .press;
+        const t_just_pressed = t_pressed and !self.last_t_press;
+        self.last_t_press = t_pressed;
+
+        if (!self.chat_open) {
+            if (t_just_pressed) {
+                self.chat_open = true;
+                self.command_len = 0;
+            }
+            return;
+        }
+
+        // Chat is open: Escape closes it
+        if (self.window.handle.getKey(.escape) == .press) {
+            self.chat_open = false;
+            return;
+        }
+
+        // Enter executes the command
+        if (self.window.handle.getKey(.enter) == .press) {
+            if (self.command_len > 0) {
+                const input = self.command_buffer[0..self.command_len];
+                const cmd = command_mod.parse(input);
+                const result = command_mod.execute(cmd);
+                std.debug.print("[CMD] {s}\n", .{result.message});
+            }
+            self.chat_open = false;
+            return;
+        }
+
+        // Buffer typed characters (printable ASCII keys)
+        self.bufferTypedKeys();
+    }
+
+    /// Poll printable key presses and append to command_buffer.
+    fn bufferTypedKeys(self: *Engine) void {
+        const printable_keys = [_]struct { key: zglfw.Key, char: u8, shifted: u8 }{
+            .{ .key = .a, .char = 'a', .shifted = 'A' },
+            .{ .key = .b, .char = 'b', .shifted = 'B' },
+            .{ .key = .c, .char = 'c', .shifted = 'C' },
+            .{ .key = .d, .char = 'd', .shifted = 'D' },
+            .{ .key = .e, .char = 'e', .shifted = 'E' },
+            .{ .key = .f, .char = 'f', .shifted = 'F' },
+            .{ .key = .g, .char = 'g', .shifted = 'G' },
+            .{ .key = .h, .char = 'h', .shifted = 'H' },
+            .{ .key = .i, .char = 'i', .shifted = 'I' },
+            .{ .key = .j, .char = 'j', .shifted = 'J' },
+            .{ .key = .k, .char = 'k', .shifted = 'K' },
+            .{ .key = .l, .char = 'l', .shifted = 'L' },
+            .{ .key = .m, .char = 'm', .shifted = 'M' },
+            .{ .key = .n, .char = 'n', .shifted = 'N' },
+            .{ .key = .o, .char = 'o', .shifted = 'O' },
+            .{ .key = .p, .char = 'p', .shifted = 'P' },
+            .{ .key = .q, .char = 'q', .shifted = 'Q' },
+            .{ .key = .r, .char = 'r', .shifted = 'R' },
+            .{ .key = .s, .char = 's', .shifted = 'S' },
+            .{ .key = .t, .char = 't', .shifted = 'T' },
+            .{ .key = .u, .char = 'u', .shifted = 'U' },
+            .{ .key = .v, .char = 'v', .shifted = 'V' },
+            .{ .key = .w, .char = 'w', .shifted = 'W' },
+            .{ .key = .x, .char = 'x', .shifted = 'X' },
+            .{ .key = .y, .char = 'y', .shifted = 'Y' },
+            .{ .key = .z, .char = 'z', .shifted = 'Z' },
+            .{ .key = .zero, .char = '0', .shifted = ')' },
+            .{ .key = .one, .char = '1', .shifted = '!' },
+            .{ .key = .two, .char = '2', .shifted = '@' },
+            .{ .key = .three, .char = '3', .shifted = '#' },
+            .{ .key = .four, .char = '4', .shifted = '$' },
+            .{ .key = .five, .char = '5', .shifted = '%' },
+            .{ .key = .six, .char = '6', .shifted = '^' },
+            .{ .key = .seven, .char = '7', .shifted = '&' },
+            .{ .key = .eight, .char = '8', .shifted = '*' },
+            .{ .key = .nine, .char = '9', .shifted = '(' },
+            .{ .key = .space, .char = ' ', .shifted = ' ' },
+            .{ .key = .slash, .char = '/', .shifted = '?' },
+            .{ .key = .period, .char = '.', .shifted = '>' },
+            .{ .key = .minus, .char = '-', .shifted = '_' },
+        };
+
+        const shift_held = (self.window.handle.getKey(.left_shift) == .press) or
+            (self.window.handle.getKey(.right_shift) == .press);
+
+        for (printable_keys) |pk| {
+            if (self.window.handle.getKey(pk.key) == .press) {
+                if (self.command_len < 255) {
+                    const ch = if (shift_held) pk.shifted else pk.char;
+                    self.command_buffer[self.command_len] = ch;
+                    self.command_len += 1;
+                }
+            }
+        }
+
+        // Backspace
+        if (self.window.handle.getKey(.backspace) == .press and self.command_len > 0) {
+            self.command_len -= 1;
+            self.command_buffer[self.command_len] = 0;
         }
     }
 
@@ -1005,4 +1159,20 @@ test "crafting module" {
 
 test "furnace module" {
     _ = furnace_mod;
+}
+
+test "breeding module" {
+    _ = breeding_mod;
+}
+
+test "fishing module" {
+    _ = fishing_mod;
+}
+
+test "command module" {
+    _ = command_mod;
+}
+
+test "experience module" {
+    _ = xp_mod;
 }
