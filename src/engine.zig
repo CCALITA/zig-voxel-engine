@@ -9,6 +9,7 @@ pub const pipeline = @import("pipeline.zig");
 pub const block = @import("world/block.zig");
 pub const Chunk = @import("world/chunk.zig");
 pub const mesh_indexed = @import("world/mesh_indexed.zig");
+pub const mesh_greedy = @import("world/mesh_greedy.zig");
 pub const mesh = @import("world/mesh.zig");
 pub const terrain_gen = @import("world/terrain_gen.zig");
 pub const noise = @import("world/noise.zig");
@@ -81,14 +82,14 @@ pub const Engine = struct {
             while (cz <= RENDER_RADIUS) : (cz += 1) {
                 const chunk_ptr = chunks.getPtr(.{ .x = cx, .z = cz }).?;
 
-                const neighbors = mesh_indexed.NeighborChunks{
+                const neighbors = mesh_greedy.NeighborChunks{
                     .north = if (chunks.getPtr(.{ .x = cx, .z = cz - 1 })) |p| p else null,
                     .south = if (chunks.getPtr(.{ .x = cx, .z = cz + 1 })) |p| p else null,
                     .east = if (chunks.getPtr(.{ .x = cx + 1, .z = cz })) |p| p else null,
                     .west = if (chunks.getPtr(.{ .x = cx - 1, .z = cz })) |p| p else null,
                 };
 
-                var mesh_data = try mesh_indexed.generateMeshWithNeighbors(allocator, chunk_ptr, neighbors);
+                var mesh_data = try mesh_greedy.generateMesh(allocator, chunk_ptr, neighbors);
                 defer mesh_data.deinit();
 
                 const world_x = cx * @as(i32, Chunk.SIZE);
@@ -425,14 +426,14 @@ pub const Engine = struct {
     fn remeshChunkByKey(self: *Engine, cx: i32, cz: i32) void {
         const chunk_ptr = self.chunks.getPtr(.{ .x = cx, .z = cz }) orelse return;
 
-        const neighbors = mesh_indexed.NeighborChunks{
+        const neighbors = mesh_greedy.NeighborChunks{
             .north = if (self.chunks.getPtr(.{ .x = cx, .z = cz - 1 })) |p| p else null,
             .south = if (self.chunks.getPtr(.{ .x = cx, .z = cz + 1 })) |p| p else null,
             .east = if (self.chunks.getPtr(.{ .x = cx + 1, .z = cz })) |p| p else null,
             .west = if (self.chunks.getPtr(.{ .x = cx - 1, .z = cz })) |p| p else null,
         };
 
-        var mesh_data = mesh_indexed.generateMeshWithNeighbors(self.allocator, chunk_ptr, neighbors) catch return;
+        var mesh_data = mesh_greedy.generateMesh(self.allocator, chunk_ptr, neighbors) catch return;
         defer mesh_data.deinit();
 
         const world_x = cx * @as(i32, Chunk.SIZE);
@@ -481,6 +482,10 @@ test "mesh module" {
 
 test "mesh_indexed module" {
     _ = mesh_indexed;
+}
+
+test "mesh_greedy module" {
+    _ = mesh_greedy;
 }
 
 test "terrain_gen module" {
