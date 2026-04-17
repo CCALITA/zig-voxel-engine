@@ -44,6 +44,18 @@ pub const block_interact = @import("world/block_interact.zig");
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
 
+// Loot item IDs for mob drops (above the BlockId range to avoid conflicts)
+const ITEM_ROTTEN_FLESH: u16 = 200;
+const ITEM_BONE: u16 = 201;
+const ITEM_ARROW: u16 = 202;
+const ITEM_GUNPOWDER: u16 = 203;
+const ITEM_RAW_PORK: u16 = 204;
+const ITEM_RAW_BEEF: u16 = 205;
+const ITEM_RAW_CHICKEN: u16 = 206;
+const ITEM_FEATHER: u16 = 207;
+const ITEM_WOOL: u16 = 208;
+const ITEM_RAW_MUTTON: u16 = 209;
+
 // Player dimensions (shared between collision and block placement)
 const PLAYER_WIDTH: f32 = 0.6;
 const PLAYER_HEIGHT: f32 = 1.8;
@@ -329,8 +341,16 @@ pub const Engine = struct {
             if (self.window.handle.getKey(.d) == .press) right_input += 1;
             if (self.window.handle.getKey(.a) == .press) right_input -= 1;
 
-            // Skip gameplay updates if dead
+            // Death screen: press R to respawn, skip gameplay updates
             if (self.player_stats.is_dead) {
+                if (self.window.handle.getKey(.r) == .press) {
+                    self.player_stats = health_mod.PlayerStats.init();
+                    self.player_x = 8.0;
+                    self.player_y = 70.0;
+                    self.player_z = 8.0;
+                    self.player_vy = 0.0;
+                    self.on_ground = false;
+                }
                 self.renderFrame(dt);
                 continue;
             }
@@ -518,6 +538,30 @@ pub const Engine = struct {
 
             // Update mob AI and remove dead entities
             self.mob_manager.update(self.player_x, self.player_y, self.player_z, dt);
+
+            // Hostile mob melee attacks on the player
+            if (self.gamemode.takesBlockDamage()) {
+                for (self.mob_manager.entities.items) |*mob| {
+                    if (!mob.alive) continue;
+                    if (!mob.entity_type.isHostile()) continue;
+                    const dist = mob.distanceToPoint(self.player_x, self.player_y, self.player_z);
+                    if (dist < 2.0) {
+                        const damage: f32 = switch (mob.entity_type) {
+                            .zombie => 3.0,
+                            .skeleton => 4.0,
+                            .creeper => 0.0, // explodes instead (future)
+                            else => 2.0,
+                        };
+                        if (damage > 0) {
+                            const reduced = self.armor.getDamageReduction(damage);
+                            self.player_stats.takeDamage(damage - reduced);
+                        }
+                    }
+                }
+            }
+
+            // Collect loot from newly dead mobs before removing them
+            self.spawnMobLoot();
             self.mob_manager.removeDeadEntities();
 
             // Drowning damage
@@ -543,6 +587,44 @@ pub const Engine = struct {
         }
 
         self.renderer.waitIdle();
+    }
+
+    /// Spawn item drops for any mobs that have just died (alive == false).
+    /// Called before removeDeadEntities so the corpses are still in the list.
+    fn spawnMobLoot(self: *Engine) void {
+        for (self.mob_manager.entities.items) |*mob| {
+            if (mob.alive) continue;
+
+            const drops: []const struct { id: u16, count: u8 } = switch (mob.entity_type) {
+                .zombie => &.{.{ .id = ITEM_ROTTEN_FLESH, .count = 1 }},
+                .skeleton => &.{
+                    .{ .id = ITEM_BONE, .count = 1 },
+                    .{ .id = ITEM_ARROW, .count = 2 },
+                },
+                .creeper => &.{.{ .id = ITEM_GUNPOWDER, .count = 1 }},
+                .pig => &.{.{ .id = ITEM_RAW_PORK, .count = 2 }},
+                .cow => &.{.{ .id = ITEM_RAW_BEEF, .count = 2 }},
+                .chicken => &.{
+                    .{ .id = ITEM_RAW_CHICKEN, .count = 1 },
+                    .{ .id = ITEM_FEATHER, .count = 2 },
+                },
+                .sheep => &.{
+                    .{ .id = ITEM_WOOL, .count = 1 },
+                    .{ .id = ITEM_RAW_MUTTON, .count = 1 },
+                },
+                else => &.{},
+            };
+
+            for (drops) |d| {
+                self.drop_manager.spawnDrop(mob.x, mob.y + 0.5, mob.z, d.id, d.count) catch {};
+            }
+
+            const mob_xp: u32 = switch (mob.entity_type) {
+                .zombie, .skeleton, .creeper => 5,
+                else => 1,
+            };
+            self.xp.addXP(mob_xp);
+        }
     }
 
     fn switchDimension(self: *Engine) void {

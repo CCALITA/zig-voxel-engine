@@ -11,6 +11,13 @@ pub const EntityType = enum {
     cow,
     chicken,
     sheep,
+
+    pub fn isHostile(self: EntityType) bool {
+        return switch (self) {
+            .zombie, .skeleton, .creeper => true,
+            else => false,
+        };
+    }
 };
 
 pub const Entity = struct {
