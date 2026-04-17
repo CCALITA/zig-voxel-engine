@@ -5,6 +5,7 @@
 /// Generation order: fill columns (biome-driven) -> carve caves -> place trees.
 const std = @import("std");
 const Chunk = @import("chunk.zig");
+const ChunkColumn = @import("chunk_column.zig");
 const block = @import("block.zig");
 const noise = @import("noise.zig");
 const biome = @import("biome.zig");
@@ -83,6 +84,110 @@ pub fn generateChunk(
     }
 
     return chunk;
+}
+
+// ---------------------------------------------------------------------------
+// Column terrain parameters (taller world)
+// ---------------------------------------------------------------------------
+
+/// Scale factor to convert biome heights (tuned for 16-high chunks) to
+/// 256-high column heights. Biome base_height ~8 maps to ~64.
+const COL_HEIGHT_SCALE: f64 = 8.0;
+
+// ---------------------------------------------------------------------------
+// Column-based generation (256-high world)
+// ---------------------------------------------------------------------------
+
+/// Generate a full 256-high chunk column at the given chunk coordinates.
+/// Uses biome-aware heightmaps with scaled parameters for the taller world.
+/// The `allocator` parameter is reserved for future use.
+pub fn generateColumn(
+    _: std.mem.Allocator,
+    seed: u64,
+    chunk_x: i32,
+    chunk_z: i32,
+) ChunkColumn {
+    const pt = noise.PermTable.init(seed);
+    const biome_noise = biome.BiomeNoise.init(seed);
+    var column = ChunkColumn.init();
+
+    for (0..Chunk.SIZE) |lz| {
+        for (0..Chunk.SIZE) |lx| {
+            const world_x: f64 = @floatFromInt(@as(i32, @intCast(lx)) +% chunk_x * @as(i32, Chunk.SIZE));
+            const world_z: f64 = @floatFromInt(@as(i32, @intCast(lz)) +% chunk_z * @as(i32, Chunk.SIZE));
+
+            // Determine biome for this column
+            const biome_type = biome_noise.getBiomeAt(world_x, world_z);
+            const biome_def = biome.getDef(biome_type);
+
+            const n = noise.fbm2d(
+                &pt,
+                world_x * NOISE_SCALE,
+                world_z * NOISE_SCALE,
+                FBM_OCTAVES,
+                FBM_LACUNARITY,
+                FBM_PERSISTENCE,
+            );
+
+            // Scale biome heights to 256-high world
+            const scaled_base = biome_def.base_height * COL_HEIGHT_SCALE;
+            const scaled_variation = biome_def.height_scale * COL_HEIGHT_SCALE;
+            const raw_height = scaled_base + n * scaled_variation;
+            const terrain_height = clampColumnHeight(raw_height);
+
+            fillColumnBlocks(
+                &column,
+                @intCast(lx),
+                @intCast(lz),
+                terrain_height,
+                biome_def.surface_block,
+                biome_def.filler_block,
+            );
+        }
+    }
+
+    return column;
+}
+
+fn clampColumnHeight(h: f64) u8 {
+    const clamped = @max(1.0, @min(128.0, @round(h)));
+    return @intFromFloat(clamped);
+}
+
+fn fillColumnBlocks(
+    column: *ChunkColumn,
+    x: u4,
+    z: u4,
+    terrain_height: u8,
+    surface_block: block.BlockId,
+    filler_block: block.BlockId,
+) void {
+    // Always bedrock at y=0
+    column.setBlock(x, 0, z, block.BEDROCK);
+
+    if (terrain_height == 0) return;
+
+    // Stone layer: y=1 up to terrain_height - 4 (inclusive)
+    const stone_top: i32 = @as(i32, terrain_height) - 4;
+    if (stone_top >= 1) {
+        var y: i32 = 1;
+        while (y <= stone_top) : (y += 1) {
+            column.setBlock(x, @intCast(y), z, block.STONE);
+        }
+    }
+
+    // Filler layer (biome-specific): from stone_top+1 up to terrain_height - 1
+    const filler_start: i32 = @max(1, stone_top + 1);
+    const filler_end: i32 = @as(i32, terrain_height) - 1;
+    if (filler_end >= filler_start) {
+        var y: i32 = filler_start;
+        while (y <= filler_end) : (y += 1) {
+            column.setBlock(x, @intCast(y), z, filler_block);
+        }
+    }
+
+    // Surface block (biome-specific)
+    column.setBlock(x, terrain_height, z, surface_block);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +395,70 @@ test "stone below filler below surface" {
                 if (y == 0) break;
                 y -= 1;
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Column generation tests
+// ---------------------------------------------------------------------------
+
+test "column: bedrock at y=0 for every column" {
+    const col = generateColumn(std.testing.allocator, 42, 0, 0);
+    for (0..Chunk.SIZE) |z| {
+        for (0..Chunk.SIZE) |x| {
+            try std.testing.expectEqual(
+                block.BEDROCK,
+                col.getBlock(@intCast(x), 0, @intCast(z)),
+            );
+        }
+    }
+}
+
+test "column: surface matches biome definition" {
+    const seed: u64 = 42;
+    const col = generateColumn(std.testing.allocator, seed, 0, 0);
+    const biome_noise = biome.BiomeNoise.init(seed);
+
+    for (0..Chunk.SIZE) |z| {
+        for (0..Chunk.SIZE) |x| {
+            const h = col.getHeight(@intCast(x), @intCast(z));
+            if (h > 0) {
+                const world_x: f64 = @floatFromInt(@as(i32, @intCast(x)));
+                const world_z: f64 = @floatFromInt(@as(i32, @intCast(z)));
+                const biome_type = biome_noise.getBiomeAt(world_x, world_z);
+                const biome_def = biome.getDef(biome_type);
+
+                const surface = col.getBlock(@intCast(x), h, @intCast(z));
+                try std.testing.expectEqual(biome_def.surface_block, surface);
+            }
+        }
+    }
+}
+
+test "column: determinism from seed" {
+    const a = generateColumn(std.testing.allocator, 12345, 3, -2);
+    const b = generateColumn(std.testing.allocator, 12345, 3, -2);
+    for (0..ChunkColumn.SECTIONS) |s| {
+        const sa = a.sections[s];
+        const sb = b.sections[s];
+        if (sa == null and sb == null) continue;
+        if (sa != null and sb != null) {
+            try std.testing.expectEqualSlices(block.BlockId, &sa.?.blocks, &sb.?.blocks);
+        } else {
+            // One null, one not -- mismatch
+            try std.testing.expect(false);
+        }
+    }
+}
+
+test "column: terrain height is in expected range" {
+    const col = generateColumn(std.testing.allocator, 42, 0, 0);
+    for (0..Chunk.SIZE) |z| {
+        for (0..Chunk.SIZE) |x| {
+            const h = col.getHeight(@intCast(x), @intCast(z));
+            try std.testing.expect(h >= 1); // at least bedrock
+            try std.testing.expect(h <= 128); // capped at 128
         }
     }
 }
