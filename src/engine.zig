@@ -19,6 +19,8 @@ pub const chunk_loader_mod = @import("world/chunk_loader.zig");
 pub const raycast = @import("gameplay/raycast.zig");
 pub const inventory_mod = @import("gameplay/inventory.zig");
 pub const time_mod = @import("world/time.zig");
+pub const mob_mod = @import("entity/mob.zig");
+pub const entity_mod = @import("entity/entity.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -57,6 +59,9 @@ pub const Engine = struct {
 
     // Day/night cycle
     game_time: time_mod.GameTime,
+
+    // Entity/mob system
+    mob_manager: mob_mod.MobManager,
 
     const ChunkKey = struct { x: i32, z: i32 };
 
@@ -129,6 +134,19 @@ pub const Engine = struct {
             _ = inventory.addItem(@as(inventory_mod.ItemId, bid), 64);
         }
 
+        // Initialize mob manager and spawn initial mobs
+        var mob_manager = mob_mod.MobManager.init(allocator);
+
+        // Spawn some passive mobs near the player
+        const spawn_types = [_]entity_mod.EntityType{ .pig, .cow, .sheep, .chicken };
+        for (spawn_types) |mob_type| {
+            try mob_manager.spawn(mob_type, 20.0, 70.0, 20.0);
+            try mob_manager.spawn(mob_type, -10.0, 70.0, 15.0);
+        }
+        // Spawn a few hostile mobs further away
+        try mob_manager.spawn(.zombie, 40.0, 70.0, 40.0);
+        try mob_manager.spawn(.skeleton, -30.0, 70.0, -30.0);
+
         return .{
             .allocator = allocator,
             .window = window,
@@ -150,10 +168,12 @@ pub const Engine = struct {
             .last_right_click = false,
             .inventory = inventory,
             .game_time = .{},
+            .mob_manager = mob_manager,
         };
     }
 
     pub fn deinit(self: *Engine) void {
+        self.mob_manager.deinit();
         self.renderer.deinit();
         self.window.deinit();
         self.chunks.deinit();
@@ -257,6 +277,10 @@ pub const Engine = struct {
 
             // Update day/night cycle
             self.game_time.update(@as(f64, @floatCast(dt)));
+
+            // Update mob AI and remove dead entities
+            self.mob_manager.update(self.player_x, self.player_y, self.player_z, dt);
+            self.mob_manager.removeDeadEntities();
 
             self.updateChunkLoading();
 
@@ -626,4 +650,12 @@ test "time module" {
 
 test "chunk_loader module" {
     _ = chunk_loader_mod;
+}
+
+test "mob module" {
+    _ = mob_mod;
+}
+
+test "entity module" {
+    _ = entity_mod;
 }
