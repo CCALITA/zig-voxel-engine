@@ -41,6 +41,8 @@ pub const fishing_mod = @import("gameplay/fishing.zig");
 pub const command_mod = @import("gameplay/commands.zig");
 pub const block_interact = @import("world/block_interact.zig");
 pub const scoreboard_mod = @import("gameplay/scoreboard.zig");
+pub const tools_mod = @import("gameplay/tools.zig");
+pub const food_mod = @import("gameplay/food.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -148,6 +150,13 @@ pub const Engine = struct {
     // Scoreboard / stat tracking
     stat_tracker: scoreboard_mod.StatTracker,
 
+    // Mining progress (held left-click block breaking)
+    mining_progress: f32 = 0.0,
+    mining_target: ?BlockPos = null,
+
+    // Food eating (held right-click consumption)
+    eating_progress: f32 = 0.0,
+
     const FurnaceEntry = struct {
         x: i32,
         y: i32,
@@ -156,6 +165,8 @@ pub const Engine = struct {
     };
 
     const ChunkKey = struct { x: i32, z: i32 };
+
+    const BlockPos = struct { x: i32, y: i32, z: i32 };
 
     pub fn init(allocator: std.mem.Allocator) !Engine {
         const window = try Window.init(.{
@@ -299,6 +310,9 @@ pub const Engine = struct {
             .last_f_press = false,
             .last_t_press = false,
             .stat_tracker = scoreboard_mod.StatTracker.init(),
+            .mining_progress = 0.0,
+            .mining_target = null,
+            .eating_progress = 0.0,
         };
     }
 
@@ -441,7 +455,7 @@ pub const Engine = struct {
             }
 
             // Block interaction (left/right mouse click)
-            self.handleBlockInteraction();
+            self.handleBlockInteraction(dt);
 
             // Portal key: P toggles between overworld and nether
             const p_pressed = self.window.handle.getKey(.p) == .press;
@@ -834,24 +848,34 @@ pub const Engine = struct {
         }
     };
 
-    fn handleBlockInteraction(self: *Engine) void {
+    fn handleBlockInteraction(self: *Engine, dt: f32) void {
         const left_pressed = self.window.handle.getMouseButton(.left) == .press;
         const right_pressed = self.window.handle.getMouseButton(.right) == .press;
 
-        const left_just_pressed = left_pressed and !self.last_left_click;
         const right_just_pressed = right_pressed and !self.last_right_click;
 
         self.last_left_click = left_pressed;
         self.last_right_click = right_pressed;
 
-        if (!left_just_pressed and !right_just_pressed) return;
+        // Reset eating when right button released
+        if (!right_pressed) {
+            self.eating_progress = 0.0;
+        }
 
-        // Cast ray from camera
+        // Reset mining when left button released
+        if (!left_pressed) {
+            self.mining_progress = 0.0;
+            self.mining_target = null;
+        }
+
+        // Skip raycast when no interaction is happening
+        if (!left_pressed and !right_pressed) return;
+
         const fwd = self.camera.forward();
         RaycastBridge.engine_ctx = self;
         defer RaycastBridge.engine_ctx = null;
 
-        const hit = raycast.cast(
+        const maybe_hit = raycast.cast(
             self.camera.pos[0],
             self.camera.pos[1],
             self.camera.pos[2],
@@ -860,32 +884,95 @@ pub const Engine = struct {
             fwd[2],
             5.0,
             &RaycastBridge.isSolid,
-        ) orelse return;
+        );
 
-        if (left_just_pressed) {
-            if (!self.gamemode.canBreak()) return;
-            self.renderer.waitIdle();
-            self.breakBlock(hit.bx, hit.by, hit.bz);
-        } else if (right_just_pressed) {
-            if (!self.gamemode.canPlace()) return;
-            const target_bid = self.getWorldBlock(hit.bx, hit.by, hit.bz) orelse block.AIR;
+        // --- Mining (held left click) ---
+        if (left_pressed) {
+            if (maybe_hit) |hit| {
+                const target = BlockPos{ .x = hit.bx, .y = hit.by, .z = hit.bz };
 
-            const interaction = block_interact.getInteraction(target_bid);
-            if (interaction != .none) {
-                const is_night = self.game_time.getPhase() == .night;
-                const result = block_interact.interact(target_bid, is_night);
-                if (result.set_time) |t| self.game_time.tick = t;
-                if (result.climb_speed) |spd| self.player_vy = spd;
-                return;
-            }
+                // Reset progress if targeting a different block
+                if (self.mining_target) |prev| {
+                    if (prev.x != target.x or prev.y != target.y or prev.z != target.z) {
+                        self.mining_progress = 0.0;
+                    }
+                }
+                self.mining_target = target;
 
-            if (target_bid == block.FURNACE) {
-                self.interactFurnace(hit.bx, hit.by, hit.bz);
+                const target_bid = self.getWorldBlock(hit.bx, hit.by, hit.bz) orelse block.AIR;
+                const mining_speed = self.getHeldToolMiningSpeed(target_bid);
+                const hardness = getBlockHardness(target_bid);
+
+                if (hardness > 0) {
+                    self.mining_progress += dt * mining_speed / hardness;
+                } else {
+                    self.mining_progress = 1.0;
+                }
+
+                if (self.mining_progress >= 1.0) {
+                    if (self.gamemode.canBreak()) {
+                        self.renderer.waitIdle();
+                        self.breakBlock(hit.bx, hit.by, hit.bz);
+                    }
+                    self.mining_progress = 0.0;
+                    self.mining_target = null;
+                }
             } else {
-                self.renderer.waitIdle();
-                self.placeBlock(hit.adjacent_x, hit.adjacent_y, hit.adjacent_z);
+                self.mining_progress = 0.0;
+                self.mining_target = null;
             }
         }
+
+        // --- Food eating (held right click) ---
+        if (right_pressed) {
+            const slot = self.inventory.getSlot(self.selected_slot);
+            if (!slot.isEmpty()) {
+                if (food_mod.getFood(slot.item)) |food_def| {
+                    self.eating_progress += dt;
+
+                    if (self.eating_progress >= food_def.eat_duration) {
+                        self.player_stats.eat(food_def.hunger_restore, food_def.saturation_restore);
+                        _ = self.inventory.removeItem(self.selected_slot, 1);
+                        self.eating_progress = 0.0;
+                    }
+                    return; // Eating takes priority over placement
+                }
+            }
+            // Not holding food -- reset eating progress
+            self.eating_progress = 0.0;
+        }
+
+        // --- Block placement / furnace interaction (right click, non-food) ---
+        if (right_just_pressed) {
+            if (maybe_hit) |hit| {
+                if (!self.gamemode.canPlace()) return;
+                const target_bid = self.getWorldBlock(hit.bx, hit.by, hit.bz) orelse block.AIR;
+
+                const interaction = block_interact.getInteraction(target_bid);
+                if (interaction != .none) {
+                    const is_night = self.game_time.getPhase() == .night;
+                    const result = block_interact.interact(target_bid, is_night);
+                    if (result.set_time) |t| self.game_time.tick = t;
+                    if (result.climb_speed) |spd| self.player_vy = spd;
+                    return;
+                }
+
+                if (target_bid == block.FURNACE) {
+                    self.interactFurnace(hit.bx, hit.by, hit.bz);
+                } else {
+                    self.renderer.waitIdle();
+                    self.placeBlock(hit.adjacent_x, hit.adjacent_y, hit.adjacent_z);
+                }
+            }
+        }
+    }
+
+    /// Get the mining speed for the currently held item against a block ID.
+    fn getHeldToolMiningSpeed(self: *Engine, block_id: block.BlockId) f32 {
+        const slot = self.inventory.getSlot(self.selected_slot);
+        if (slot.isEmpty()) return tools_mod.getMiningSpeed(null, @intCast(block_id));
+        const tool_def = itemToToolDef(slot.item);
+        return tools_mod.getMiningSpeed(tool_def, @intCast(block_id));
     }
 
     /// Quick-craft: when C is pressed, try to auto-craft the first matching recipe
@@ -1110,6 +1197,31 @@ pub const Engine = struct {
         return &self.active_furnaces.items[self.active_furnaces.items.len - 1].state;
     }
 
+    /// Block hardness in seconds to mine with bare hand (mining speed 1.0).
+    /// Values follow vanilla Minecraft conventions.
+    fn getBlockHardness(block_id: block.BlockId) f32 {
+        return switch (block_id) {
+            block.DIRT, block.GRASS, block.SAND, block.GRAVEL, block.CLAY => 0.75,
+            block.STONE, block.COBBLESTONE, block.MOSSY_COBBLESTONE => 1.5,
+            block.OAK_LOG, block.OAK_PLANKS, block.BOOKSHELF, block.CHEST => 2.0,
+            block.OAK_LEAVES => 0.2,
+            block.COAL_ORE, block.IRON_ORE, block.GOLD_ORE, block.DIAMOND_ORE, block.REDSTONE_ORE => 3.0,
+            block.OBSIDIAN => 50.0,
+            block.BRICK => 2.0,
+            block.SNOW, block.ICE => 0.5,
+            block.CACTUS => 0.4,
+            block.PUMPKIN, block.MELON => 1.0,
+            block.GLOWSTONE => 0.3,
+            block.NETHERRACK => 0.4,
+            block.SOUL_SAND => 0.5,
+            block.GLASS => 0.3,
+            block.TNT => 0.0, // instant
+            block.FURNACE => 3.5,
+            block.BEDROCK => 999.0, // effectively unbreakable
+            else => 1.0, // default for unlisted blocks
+        };
+    }
+
     fn breakBlock(self: *Engine, wx: i32, wy: i32, wz: i32) void {
         // Read old block before replacing with air
         const old_block = self.getWorldBlock(wx, wy, wz) orelse return;
@@ -1248,6 +1360,57 @@ pub const Engine = struct {
         }
     }
 };
+
+// ---------------------------------------------------------------------------
+// Tool item IDs (non-block items, starting at 300 to avoid block/food overlap)
+// ---------------------------------------------------------------------------
+const WOOD_PICKAXE: u16 = 300;
+const STONE_PICKAXE: u16 = 301;
+const IRON_PICKAXE: u16 = 302;
+const GOLD_PICKAXE: u16 = 303;
+const DIAMOND_PICKAXE: u16 = 304;
+const WOOD_AXE: u16 = 305;
+const STONE_AXE: u16 = 306;
+const IRON_AXE: u16 = 307;
+const GOLD_AXE: u16 = 308;
+const DIAMOND_AXE: u16 = 309;
+const WOOD_SHOVEL: u16 = 310;
+const STONE_SHOVEL: u16 = 311;
+const IRON_SHOVEL: u16 = 312;
+const GOLD_SHOVEL: u16 = 313;
+const DIAMOND_SHOVEL: u16 = 314;
+const WOOD_SWORD: u16 = 315;
+const STONE_SWORD: u16 = 316;
+const IRON_SWORD: u16 = 317;
+const GOLD_SWORD: u16 = 318;
+const DIAMOND_SWORD: u16 = 319;
+
+/// Map an inventory item ID to its ToolDef, or null if the item is not a tool.
+fn itemToToolDef(item_id: u16) ?tools_mod.ToolDef {
+    return switch (item_id) {
+        WOOD_PICKAXE => tools_mod.getToolDef(.wood, .pickaxe),
+        STONE_PICKAXE => tools_mod.getToolDef(.stone, .pickaxe),
+        IRON_PICKAXE => tools_mod.getToolDef(.iron, .pickaxe),
+        GOLD_PICKAXE => tools_mod.getToolDef(.gold, .pickaxe),
+        DIAMOND_PICKAXE => tools_mod.getToolDef(.diamond, .pickaxe),
+        WOOD_AXE => tools_mod.getToolDef(.wood, .axe),
+        STONE_AXE => tools_mod.getToolDef(.stone, .axe),
+        IRON_AXE => tools_mod.getToolDef(.iron, .axe),
+        GOLD_AXE => tools_mod.getToolDef(.gold, .axe),
+        DIAMOND_AXE => tools_mod.getToolDef(.diamond, .axe),
+        WOOD_SHOVEL => tools_mod.getToolDef(.wood, .shovel),
+        STONE_SHOVEL => tools_mod.getToolDef(.stone, .shovel),
+        IRON_SHOVEL => tools_mod.getToolDef(.iron, .shovel),
+        GOLD_SHOVEL => tools_mod.getToolDef(.gold, .shovel),
+        DIAMOND_SHOVEL => tools_mod.getToolDef(.diamond, .shovel),
+        WOOD_SWORD => tools_mod.getToolDef(.wood, .sword),
+        STONE_SWORD => tools_mod.getToolDef(.stone, .sword),
+        IRON_SWORD => tools_mod.getToolDef(.iron, .sword),
+        GOLD_SWORD => tools_mod.getToolDef(.gold, .sword),
+        DIAMOND_SWORD => tools_mod.getToolDef(.diamond, .sword),
+        else => null,
+    };
+}
 
 /// Mesh all non-null sections of a column and upload them to the renderer.
 /// Each section is meshed with its vertical and horizontal neighbors using
@@ -1490,4 +1653,12 @@ test "block_interact module" {
 
 test "scoreboard module" {
     _ = scoreboard_mod;
+}
+
+test "tools module" {
+    _ = tools_mod;
+}
+
+test "food module" {
+    _ = food_mod;
 }
