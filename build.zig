@@ -311,6 +311,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_fishing_tests = b.addRunArtifact(fishing_tests);
 
+    // Food tests
+    const food_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/food.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_food_tests = b.addRunArtifact(food_tests);
+
     // Vegetation generation tests (rooted at src/world/ for relative import resolution)
     const vegetation_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -356,6 +366,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_end_gen_tests.step);
     test_step.dependOn(&run_ender_dragon_tests.step);
     test_step.dependOn(&run_fishing_tests.step);
+    test_step.dependOn(&run_food_tests.step);
     test_step.dependOn(&run_vegetation_tests.step);
     test_step.dependOn(&run_projectiles_tests.step);
 }
