@@ -86,7 +86,7 @@ pub fn create(
         .rasterizer_discard_enable = vk.Bool32.false,
         .polygon_mode = .fill,
         .line_width = 1.0,
-        .cull_mode = .{ .back_bit = true },
+        .cull_mode = .{},
         .front_face = .clockwise,
         .depth_bias_enable = vk.Bool32.false,
         .depth_bias_constant_factor = 0.0,
