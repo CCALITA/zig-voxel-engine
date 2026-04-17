@@ -117,10 +117,43 @@ pub fn build(b: *std.Build) void {
     });
     const run_caves_tests = b.addRunArtifact(caves_tests);
 
+    // Network protocol tests
+    const network_protocol_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/network/protocol.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_network_protocol_tests = b.addRunArtifact(network_protocol_tests);
+
+    // Network server tests
+    const network_server_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/network/server.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_network_server_tests = b.addRunArtifact(network_server_tests);
+
+    // Network client tests
+    const network_client_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/network/client.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_network_client_tests = b.addRunArtifact(network_client_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_physics_collision_tests.step);
     test_step.dependOn(&run_tree_gen_tests.step);
     test_step.dependOn(&run_caves_tests.step);
+    test_step.dependOn(&run_network_protocol_tests.step);
+    test_step.dependOn(&run_network_server_tests.step);
+    test_step.dependOn(&run_network_client_tests.step);
 }
