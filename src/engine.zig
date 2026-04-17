@@ -13,6 +13,7 @@ pub const mesh = @import("world/mesh.zig");
 pub const terrain_gen = @import("world/terrain_gen.zig");
 pub const noise = @import("world/noise.zig");
 pub const chunk_map = @import("world/chunk_map.zig");
+pub const chunk_loader_mod = @import("world/chunk_loader.zig");
 pub const raycast = @import("gameplay/raycast.zig");
 pub const inventory_mod = @import("gameplay/inventory.zig");
 
@@ -36,6 +37,7 @@ pub const Engine = struct {
 
     // World chunks stored for collision
     chunks: std.AutoHashMap(ChunkKey, Chunk),
+    chunk_loader: chunk_loader_mod.ChunkLoader,
 
     // Player physics
     player_x: f32,
@@ -63,22 +65,26 @@ pub const Engine = struct {
 
         var renderer = try Renderer.init(allocator, window.handle);
 
-        // Generate all chunks first
         var chunks = std.AutoHashMap(ChunkKey, Chunk).init(allocator);
-        var cx: i32 = -RENDER_RADIUS;
-        while (cx <= RENDER_RADIUS) : (cx += 1) {
-            var cz: i32 = -RENDER_RADIUS;
-            while (cz <= RENDER_RADIUS) : (cz += 1) {
+        var chunk_loader = chunk_loader_mod.ChunkLoader.init(allocator, RENDER_RADIUS);
+
+        // Generate a small initial set (3x3 around spawn) to avoid blank first frame
+        const INIT_RADIUS: i32 = 1;
+        var cx: i32 = -INIT_RADIUS;
+        while (cx <= INIT_RADIUS) : (cx += 1) {
+            var cz: i32 = -INIT_RADIUS;
+            while (cz <= INIT_RADIUS) : (cz += 1) {
                 const chunk = terrain_gen.generateChunk(allocator, SEED, cx, cz);
                 try chunks.put(.{ .x = cx, .z = cz }, chunk);
+                try chunk_loader.markLoaded(.{ .x = cx, .z = cz });
             }
         }
 
-        // Mesh each chunk with neighbor data for seamless borders
-        cx = -RENDER_RADIUS;
-        while (cx <= RENDER_RADIUS) : (cx += 1) {
-            var cz: i32 = -RENDER_RADIUS;
-            while (cz <= RENDER_RADIUS) : (cz += 1) {
+        // Mesh each initial chunk with neighbor data for seamless borders
+        cx = -INIT_RADIUS;
+        while (cx <= INIT_RADIUS) : (cx += 1) {
+            var cz: i32 = -INIT_RADIUS;
+            while (cz <= INIT_RADIUS) : (cz += 1) {
                 const chunk_ptr = chunks.getPtr(.{ .x = cx, .z = cz }).?;
 
                 const neighbors = mesh_indexed.NeighborChunks{
@@ -139,6 +145,7 @@ pub const Engine = struct {
             .last_cursor_y = 0.0,
             .first_mouse = true,
             .chunks = chunks,
+            .chunk_loader = chunk_loader,
             .player_x = 8.0,
             .player_y = spawn_y,
             .player_z = 8.0,
@@ -155,6 +162,7 @@ pub const Engine = struct {
         self.renderer.deinit();
         self.window.deinit();
         self.chunks.deinit();
+        self.chunk_loader.deinit();
     }
 
     pub fn run(self: *Engine) void {
@@ -252,6 +260,8 @@ pub const Engine = struct {
             const zm = @import("zmath");
             self.camera.pos = zm.f32x4(self.player_x, self.player_y + 1.6, self.player_z, 1.0);
 
+            self.updateChunkLoading();
+
             // Compute VP matrix
             const vp = self.camera.vpMatrix();
             const vp_arr = Camera.matToArray(vp);
@@ -263,6 +273,57 @@ pub const Engine = struct {
         }
 
         self.renderer.waitIdle();
+    }
+
+    fn updateChunkLoading(self: *Engine) void {
+        const size_i32: i32 = @intCast(Chunk.SIZE);
+        const player_cx = @divFloor(@as(i32, @intFromFloat(@floor(self.player_x))), size_i32);
+        const player_cz = @divFloor(@as(i32, @intFromFloat(@floor(self.player_z))), size_i32);
+
+        var load_result = self.chunk_loader.update(player_cx, player_cz) catch return;
+        defer load_result.deinit();
+
+        for (load_result.to_unload) |coord| {
+            self.unloadChunk(coord.x, coord.z);
+        }
+
+        const load_count = @min(load_result.to_load.len, 2);
+        for (load_result.to_load[0..load_count]) |coord| {
+            self.loadChunk(coord.x, coord.z);
+        }
+    }
+
+    fn loadChunk(self: *Engine, cx: i32, cz: i32) void {
+        const chunk = terrain_gen.generateChunk(self.allocator, SEED, cx, cz);
+        self.chunks.put(.{ .x = cx, .z = cz }, chunk) catch return;
+        self.meshAndUploadChunk(cx, cz);
+        self.chunk_loader.markLoaded(.{ .x = cx, .z = cz }) catch return;
+    }
+
+    fn unloadChunk(self: *Engine, cx: i32, cz: i32) void {
+        const world_x = cx * @as(i32, Chunk.SIZE);
+        const world_z = cz * @as(i32, Chunk.SIZE);
+        self.renderer.removeChunkRender(world_x, world_z);
+        _ = self.chunks.remove(.{ .x = cx, .z = cz });
+        self.chunk_loader.markUnloaded(.{ .x = cx, .z = cz });
+    }
+
+    /// Mesh the chunk at (cx, cz) using its neighbors and upload to the renderer.
+    fn meshAndUploadChunk(self: *Engine, cx: i32, cz: i32) void {
+        const chunk_ptr = self.chunks.getPtr(.{ .x = cx, .z = cz }) orelse return;
+        const neighbors = mesh_indexed.NeighborChunks{
+            .north = if (self.chunks.getPtr(.{ .x = cx, .z = cz - 1 })) |p| p else null,
+            .south = if (self.chunks.getPtr(.{ .x = cx, .z = cz + 1 })) |p| p else null,
+            .east = if (self.chunks.getPtr(.{ .x = cx + 1, .z = cz })) |p| p else null,
+            .west = if (self.chunks.getPtr(.{ .x = cx - 1, .z = cz })) |p| p else null,
+        };
+
+        var mesh_data = mesh_indexed.generateMeshWithNeighbors(self.allocator, chunk_ptr, neighbors) catch return;
+        defer mesh_data.deinit();
+
+        const world_x = cx * @as(i32, Chunk.SIZE);
+        const world_z = cz * @as(i32, Chunk.SIZE);
+        self.renderer.uploadChunk(mesh_data.vertices, mesh_data.indices, world_x, 0, world_z) catch return;
     }
 
     fn collidesAt(self: *Engine, px: f32, py: f32, pz: f32, half_w: f32, height: f32) bool {
@@ -423,43 +484,11 @@ pub const Engine = struct {
     }
 
     fn remeshChunkByKey(self: *Engine, cx: i32, cz: i32) void {
-        const chunk_ptr = self.chunks.getPtr(.{ .x = cx, .z = cz }) orelse return;
-
-        const neighbors = mesh_indexed.NeighborChunks{
-            .north = if (self.chunks.getPtr(.{ .x = cx, .z = cz - 1 })) |p| p else null,
-            .south = if (self.chunks.getPtr(.{ .x = cx, .z = cz + 1 })) |p| p else null,
-            .east = if (self.chunks.getPtr(.{ .x = cx + 1, .z = cz })) |p| p else null,
-            .west = if (self.chunks.getPtr(.{ .x = cx - 1, .z = cz })) |p| p else null,
-        };
-
-        var mesh_data = mesh_indexed.generateMeshWithNeighbors(self.allocator, chunk_ptr, neighbors) catch return;
-        defer mesh_data.deinit();
-
+        if (self.chunks.getPtr(.{ .x = cx, .z = cz }) == null) return;
         const world_x = cx * @as(i32, Chunk.SIZE);
         const world_z = cz * @as(i32, Chunk.SIZE);
-
-        // Remove old chunk render data for this chunk
-        self.removeChunkRender(world_x, 0, world_z);
-
-        // Upload new mesh (skip if empty -- chunk is now all air)
-        self.renderer.uploadChunk(mesh_data.vertices, mesh_data.indices, world_x, 0, world_z) catch return;
-    }
-
-    fn removeChunkRender(self: *Engine, world_x: i32, world_y: i32, world_z: i32) void {
-        var i: usize = 0;
-        while (i < self.renderer.chunk_renders.items.len) {
-            const cr = self.renderer.chunk_renders.items[i];
-            if (cr.world_x == world_x and cr.world_y == world_y and cr.world_z == world_z) {
-                // Destroy GPU resources
-                self.renderer.vkd.destroyBuffer(self.renderer.device, cr.vertex_buffer, null);
-                self.renderer.vkd.freeMemory(self.renderer.device, cr.vertex_buffer_memory, null);
-                self.renderer.vkd.destroyBuffer(self.renderer.device, cr.index_buffer, null);
-                self.renderer.vkd.freeMemory(self.renderer.device, cr.index_buffer_memory, null);
-                _ = self.renderer.chunk_renders.swapRemove(i);
-                return;
-            }
-            i += 1;
-        }
+        self.renderer.removeChunkRender(world_x, world_z);
+        self.meshAndUploadChunk(cx, cz);
     }
 };
 
@@ -501,4 +530,8 @@ test "raycast module" {
 
 test "inventory module" {
     _ = inventory_mod;
+}
+
+test "chunk_loader module" {
+    _ = chunk_loader_mod;
 }
