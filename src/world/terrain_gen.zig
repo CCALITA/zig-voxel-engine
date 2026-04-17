@@ -21,6 +21,7 @@ const structures = @import("worldgen/structures.zig");
 // Terrain parameters
 // ---------------------------------------------------------------------------
 
+const SEA_LEVEL: u8 = 62;
 const NOISE_SCALE: f64 = 0.008; // world-space -> noise-space (lower = smoother hills)
 const FBM_OCTAVES: u32 = 4;
 const FBM_LACUNARITY: f64 = 2.0;
@@ -151,6 +152,9 @@ pub fn generateColumn(
         }
     }
 
+    // --- Phase 1b: Fill water below sea level ---
+    fillWater(&column);
+
     // --- Phase 2: Place ore veins (before cave carving so caves cut through ores) ---
     placeOreVeins(&column, seed, chunk_x, chunk_z);
 
@@ -210,6 +214,27 @@ fn fillColumnBlocks(
 
     // Surface block (biome-specific)
     column.setBlock(x, terrain_height, z, surface_block);
+}
+
+/// Fill air blocks with water from surface+1 up to SEA_LEVEL for any column
+/// whose terrain surface is below sea level. Creates oceans, lakes, and rivers.
+fn fillWater(column: *ChunkColumn) void {
+    for (0..Chunk.SIZE) |lz| {
+        for (0..Chunk.SIZE) |lx| {
+            const x: u4 = @intCast(lx);
+            const z: u4 = @intCast(lz);
+            const surface = column.getHeight(x, z);
+
+            if (surface < SEA_LEVEL) {
+                var y: u8 = surface + 1;
+                while (y <= SEA_LEVEL) : (y += 1) {
+                    if (column.getBlock(x, y, z) == block.AIR) {
+                        column.setBlock(x, y, z, block.WATER);
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -648,9 +673,12 @@ test "column: surface matches biome definition" {
                 const biome_def = biome.getDef(biome_type);
 
                 const surface = col.getBlock(@intCast(x), h, @intCast(z));
-                // Surface may be overwritten by a structure
+                // Surface may be overwritten by a structure or covered by water
                 if (has_structure) {
                     try std.testing.expect(surface != block.AIR);
+                } else if (surface == block.WATER) {
+                    // Water-filled column: terrain was below sea level
+                    try std.testing.expect(h <= SEA_LEVEL);
                 } else {
                     try std.testing.expectEqual(biome_def.surface_block, surface);
                 }
