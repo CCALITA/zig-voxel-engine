@@ -231,6 +231,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_farming_tests = b.addRunArtifact(farming_tests);
 
+    // Tile entity tests
+    const tile_entity_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/world/tile_entity.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_tile_entity_tests = b.addRunArtifact(tile_entity_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -248,4 +258,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_weather_tests.step);
     test_step.dependOn(&run_movement_tests.step);
     test_step.dependOn(&run_farming_tests.step);
+    test_step.dependOn(&run_tile_entity_tests.step);
 }
