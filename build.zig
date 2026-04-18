@@ -495,6 +495,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_banners_tests = b.addRunArtifact(banners_tests);
 
+    // Copper & special block tests
+    const copper_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/world/copper.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_copper_tests = b.addRunArtifact(copper_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -538,4 +548,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_automation_tests.step);
     test_step.dependOn(&run_piston_tests.step);
     test_step.dependOn(&run_banners_tests.step);
+    test_step.dependOn(&run_copper_tests.step);
 }
