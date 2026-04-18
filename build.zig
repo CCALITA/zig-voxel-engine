@@ -361,6 +361,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_explosion_tests = b.addRunArtifact(explosion_tests);
 
+    // Cooking system tests
+    const cooking_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/cooking.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_cooking_tests = b.addRunArtifact(cooking_tests);
+
     // Ender items tests
     const ender_items_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -505,6 +515,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_projectiles_tests.step);
     test_step.dependOn(&run_hazards_tests.step);
     test_step.dependOn(&run_explosion_tests.step);
+    test_step.dependOn(&run_cooking_tests.step);
     test_step.dependOn(&run_ender_items_tests.step);
     test_step.dependOn(&run_villager_tests.step);
     test_step.dependOn(&run_spawner_tests.step);
