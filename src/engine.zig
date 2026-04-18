@@ -77,18 +77,6 @@ pub const automation_mod = @import("gameplay/automation.zig");
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
 
-// Loot item IDs for mob drops (above the BlockId range to avoid conflicts)
-const ITEM_ROTTEN_FLESH: u16 = 200;
-const ITEM_BONE: u16 = 201;
-const ITEM_ARROW: u16 = 202;
-const ITEM_GUNPOWDER: u16 = 203;
-const ITEM_RAW_PORK: u16 = 204;
-const ITEM_RAW_BEEF: u16 = 205;
-const ITEM_RAW_CHICKEN: u16 = 206;
-const ITEM_FEATHER: u16 = 207;
-const ITEM_WOOL: u16 = 208;
-const ITEM_RAW_MUTTON: u16 = 209;
-
 // Enchanting table block ID (placeholder until added to block.zig)
 const ENCHANTING_TABLE_BLOCK_ID: u8 = 47;
 
@@ -639,11 +627,9 @@ pub const Engine = struct {
 
             // Fall damage: when landing (on_ground transitions false -> true)
             // Only in game modes that take damage
-            if (self.gamemode.takesBlockDamage() and self.on_ground and !was_on_ground and pre_land_vy < -10.0) {
+            if (self.on_ground and !was_on_ground and pre_land_vy < -10.0) {
                 const fall_damage = @abs(pre_land_vy) - 10.0;
-                const reduced = self.armor.getDamageReduction(fall_damage);
-                self.player_stats.takeDamage(fall_damage - reduced);
-                self.stat_tracker.increment(.damage_taken, 1);
+                self.applyDamageWithArmor(fall_damage);
             }
 
             // Contact damage from environmental hazards (lava, fire, cactus)
@@ -745,8 +731,7 @@ pub const Engine = struct {
                         };
                         const damage = base_damage * self.world_rules.getMobDamageMultiplier();
                         if (damage > 0) {
-                            const reduced = self.armor.getDamageReduction(damage);
-                            self.player_stats.takeDamage(damage - reduced);
+                            self.applyDamageWithArmor(damage);
                         }
                     }
                 }
@@ -763,9 +748,7 @@ pub const Engine = struct {
                     const pdy = proj.y - (self.player_y + 1.0);
                     const pdz = proj.z - self.player_z;
                     if (pdx * pdx + pdy * pdy + pdz * pdz < 1.0) {
-                        const proj_reduced = self.armor.getDamageReduction(proj.damage);
-                        self.player_stats.takeDamage(proj.damage - proj_reduced);
-                        self.stat_tracker.increment(.damage_taken, 1);
+                        self.applyDamageWithArmor(proj.damage);
                         proj.active = false;
                     }
                 }
@@ -782,9 +765,7 @@ pub const Engine = struct {
             // Drowning damage
             const drown_dmg = self.water_state.updateOxygen(dt);
             if (drown_dmg > 0) {
-                const drown_reduced = self.armor.getDamageReduction(drown_dmg);
-                self.player_stats.takeDamage(drown_dmg - drown_reduced);
-                self.stat_tracker.increment(.damage_taken, 1);
+                self.applyDamageWithArmor(drown_dmg);
             }
 
             // Update item drops (physics, pickup, despawn)
@@ -897,41 +878,30 @@ pub const Engine = struct {
         };
     }
 
+    /// Apply damage to the player after armor reduction, and record it on the
+    /// stat tracker.  No-ops when the current game mode is immune to damage.
+    fn applyDamageWithArmor(self: *Engine, raw_damage: f32) void {
+        if (!self.gamemode.takesBlockDamage()) return;
+        const reduced = self.armor.getDamageReduction(raw_damage);
+        self.player_stats.takeDamage(raw_damage - reduced);
+        self.stat_tracker.increment(.damage_taken, 1);
+    }
+
     /// Spawn item drops for any mobs that have just died (alive == false).
     /// Called before removeDeadEntities so the corpses are still in the list.
     fn spawnMobLoot(self: *Engine) void {
         for (self.mob_manager.entities.items) |*mob| {
             if (mob.alive) continue;
 
-            const drops: []const struct { id: u16, count: u8 } = switch (mob.entity_type) {
-                .zombie => &.{.{ .id = ITEM_ROTTEN_FLESH, .count = 1 }},
-                .skeleton => &.{
-                    .{ .id = ITEM_BONE, .count = 1 },
-                    .{ .id = ITEM_ARROW, .count = 2 },
-                },
-                .creeper => &.{.{ .id = ITEM_GUNPOWDER, .count = 1 }},
-                .pig => &.{.{ .id = ITEM_RAW_PORK, .count = 2 }},
-                .cow => &.{.{ .id = ITEM_RAW_BEEF, .count = 2 }},
-                .chicken => &.{
-                    .{ .id = ITEM_RAW_CHICKEN, .count = 1 },
-                    .{ .id = ITEM_FEATHER, .count = 2 },
-                },
-                .sheep => &.{
-                    .{ .id = ITEM_WOOL, .count = 1 },
-                    .{ .id = ITEM_RAW_MUTTON, .count = 1 },
-                },
-                else => &.{},
-            };
-
-            for (drops) |d| {
-                self.drop_manager.spawnDrop(mob.x, mob.y + 0.5, mob.z, d.id, d.count) catch {};
+            const loot = loot_mod.getMobLoot(@intFromEnum(mob.entity_type));
+            const result = loot_mod.rollLoot(loot, 0, @intCast(self.game_time.tick));
+            for (0..result.item_count) |i| {
+                if (result.items[i]) |item| {
+                    self.drop_manager.spawnDrop(mob.x, mob.y, mob.z, item.id, item.count) catch {};
+                }
             }
 
-            const mob_xp: u32 = switch (mob.entity_type) {
-                .zombie, .skeleton, .creeper => 5,
-                else => 1,
-            };
-            self.xp.addXP(mob_xp);
+            if (result.xp > 0) self.xp.addXP(result.xp);
         }
     }
 
@@ -1200,9 +1170,7 @@ pub const Engine = struct {
                     const dist = @sqrt(dx * dx + dy * dy + dz * dz);
                     if (dist < explosion_mod.tnt_radius) {
                         const blast_dmg = explosion_mod.tnt_power * (1.0 - dist / explosion_mod.tnt_radius);
-                        const reduced = self.armor.getDamageReduction(blast_dmg);
-                        self.player_stats.takeDamage(blast_dmg - reduced);
-                        self.stat_tracker.increment(.damage_taken, 1);
+                        self.applyDamageWithArmor(blast_dmg);
                     }
                 }
 
