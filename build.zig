@@ -351,6 +351,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_hazards_tests = b.addRunArtifact(hazards_tests);
 
+    // Explosion system tests
+    const explosion_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/explosion.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_explosion_tests = b.addRunArtifact(explosion_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -380,4 +390,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_vegetation_tests.step);
     test_step.dependOn(&run_projectiles_tests.step);
     test_step.dependOn(&run_hazards_tests.step);
+    test_step.dependOn(&run_explosion_tests.step);
 }
