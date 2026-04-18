@@ -56,6 +56,7 @@ pub const cooking_mod = @import("gameplay/cooking.zig");
 pub const copper_mod = @import("gameplay/copper.zig");
 pub const mob_variants_mod = @import("entity/mob_variants.zig");
 pub const advancements_mod = @import("gameplay/advancements.zig");
+pub const pathfinding_mod = @import("entity/pathfinding.zig");
 
 // Batch 9 modules
 pub const world_rules_mod = @import("world/world_rules.zig");
@@ -673,7 +674,11 @@ pub const Engine = struct {
             self.player_stats.update(dt);
 
             // Update mob AI and remove dead entities
+            PathfindingBridge.engine_ctx = self;
+            pathfinding_mod.WalkabilityBridge.isWalkableFn = &PathfindingBridge.isWalkable;
             self.mob_manager.update(self.player_x, self.player_y, self.player_z, dt);
+            pathfinding_mod.WalkabilityBridge.isWalkableFn = null;
+            PathfindingBridge.engine_ctx = null;
 
             // Per-frame mob spawning via spawner
             if (self.mob_spawner.update(dt)) {
@@ -1127,6 +1132,27 @@ pub const Engine = struct {
         fn getBlock(x: i32, y: i32, z: i32) u8 {
             const eng = engine_ctx orelse return 0;
             return eng.getWorldBlock(x, y, z) orelse 0;
+        }
+    };
+
+    /// Walkability wrapper for mob A* pathfinding.
+    /// A position is walkable when:
+    ///   - the block at (x, y, z) and (x, y+1, z) are not solid (room for feet+head)
+    ///   - the block at (x, y-1, z) IS solid (ground to stand on)
+    const PathfindingBridge = struct {
+        var engine_ctx: ?*Engine = null;
+
+        fn isWalkable(x: i32, y: i32, z: i32) bool {
+            const eng = engine_ctx orelse return false;
+            // Must have solid ground below.
+            const ground = eng.getWorldBlock(x, y - 1, z) orelse return false;
+            if (!block.isSolid(ground)) return false;
+            // Feet and head blocks must be non-solid.
+            const feet = eng.getWorldBlock(x, y, z) orelse return true;
+            if (block.isSolid(feet)) return false;
+            const head = eng.getWorldBlock(x, y + 1, z) orelse return true;
+            if (block.isSolid(head)) return false;
+            return true;
         }
     };
 
@@ -2197,4 +2223,8 @@ test "mob_variants module" {
 
 test "advancements module" {
     _ = advancements_mod;
+}
+
+test "pathfinding module" {
+    _ = pathfinding_mod;
 }
