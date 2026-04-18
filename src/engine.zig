@@ -47,6 +47,7 @@ pub const hazards_mod = @import("gameplay/hazards.zig");
 pub const explosion_mod = @import("gameplay/explosion.zig");
 pub const projectiles_mod = @import("gameplay/projectiles.zig");
 pub const spawner_mod = @import("entity/spawner.zig");
+pub const taming_mod = @import("entity/taming.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -1872,4 +1873,8 @@ test "projectiles module" {
 
 test "spawner module" {
     _ = spawner_mod;
+}
+
+test "taming module" {
+    _ = taming_mod;
 }
