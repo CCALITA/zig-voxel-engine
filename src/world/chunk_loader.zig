@@ -66,7 +66,7 @@ pub const ChunkLoader = struct {
         defer gpa.free(spiral);
 
         // Build to_load: spiral-ordered coords within range that are not yet loaded.
-        var load_list: std.ArrayList(ChunkCoord) = .empty;
+        var load_list: std.ArrayList(ChunkCoord) = .{};
         defer load_list.deinit(gpa);
 
         // Build a set of desired coords for fast lookup when computing to_unload.
@@ -88,7 +88,7 @@ pub const ChunkLoader = struct {
         }
 
         // Build to_unload: loaded chunks not in the desired set.
-        var unload_list: std.ArrayList(ChunkCoord) = .empty;
+        var unload_list: std.ArrayList(ChunkCoord) = .{};
         defer unload_list.deinit(gpa);
 
         var it = self.loaded.iterator();
