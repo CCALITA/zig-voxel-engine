@@ -1,9 +1,12 @@
 /// AI behavior for mobs: idle, wander, chase, and flee states.
 /// Passive mobs only idle and wander; hostile mobs chase the player.
+/// Uses A* pathfinding to navigate around obstacles.
 const std = @import("std");
 const entity_mod = @import("entity.zig");
 const EntityType = entity_mod.EntityType;
 const Entity = entity_mod.Entity;
+const pathfinding = @import("pathfinding.zig");
+const PathNode = pathfinding.PathNode;
 
 pub const AiState = enum {
     idle,
@@ -21,6 +24,12 @@ pub const AiBehavior = struct {
     chase_range: f32,
     attack_range: f32,
 
+    /// Cached A* path for obstacle-aware navigation.
+    path: [64]PathNode,
+    path_length: u8,
+    path_index: u8,
+    path_timer: f32,
+
     /// Create AI behavior with type-appropriate defaults.
     pub fn init(entity_type: EntityType) AiBehavior {
         const params = getAiParams(entity_type);
@@ -32,6 +41,10 @@ pub const AiBehavior = struct {
             .wander_radius = params.wander_radius,
             .chase_range = params.chase_range,
             .attack_range = params.attack_range,
+            .path = undefined,
+            .path_length = 0,
+            .path_index = 0,
+            .path_timer = 0,
         };
     }
 
@@ -46,6 +59,7 @@ pub const AiBehavior = struct {
         dt: f32,
     ) void {
         self.state_timer -= dt;
+        self.path_timer -= dt;
 
         const is_hostile = isHostile(entity.entity_type);
         const dist_to_player = entity.distanceToPoint(player_x, player_y, player_z);
@@ -54,12 +68,14 @@ pub const AiBehavior = struct {
         if (is_hostile and dist_to_player <= self.chase_range and self.state != .chase) {
             self.state = .chase;
             self.state_timer = 0;
+            self.path_timer = 0; // force immediate pathfind
         }
 
         // Hostile mobs leave chase when player exits range.
         if (is_hostile and self.state == .chase and dist_to_player > self.chase_range) {
             self.state = .idle;
             self.state_timer = 3.0;
+            self.clearPath();
         }
 
         switch (self.state) {
@@ -71,23 +87,33 @@ pub const AiBehavior = struct {
                     self.target_x = entity.x + randomOffset(self.wander_radius);
                     self.target_z = entity.z + randomOffset(self.wander_radius);
                     self.state_timer = 3.0;
+                    self.computePath(entity);
                 }
             },
             .wander => {
-                moveToward(entity, self.target_x, self.target_z, walk_speed * 0.5);
+                self.followPath(entity, walk_speed * 0.5);
 
                 const dx = self.target_x - entity.x;
                 const dz = self.target_z - entity.z;
                 const dist_sq = dx * dx + dz * dz;
-                if (dist_sq < 0.5 or self.state_timer <= 0) {
+                if (dist_sq < 0.5 or self.state_timer <= 0 or self.isPathComplete()) {
                     self.state = .idle;
                     self.state_timer = 2.0 + randomOffset(1.5);
                     entity.vx = 0;
                     entity.vz = 0;
+                    self.clearPath();
                 }
             },
             .chase => {
-                moveToward(entity, player_x, player_z, walk_speed);
+                // Recalculate path every 2 seconds to track the player.
+                if (self.path_timer <= 0) {
+                    self.target_x = player_x;
+                    self.target_z = player_z;
+                    self.computePath(entity);
+                    self.path_timer = path_recalc_interval;
+                }
+
+                self.followPath(entity, walk_speed);
             },
             .flee => {
                 // Move away from the player by targeting the mirror point.
@@ -97,15 +123,67 @@ pub const AiBehavior = struct {
                 if (self.state_timer <= 0) {
                     self.state = .idle;
                     self.state_timer = 3.0;
+                    self.clearPath();
                 }
             },
         }
+    }
+
+    /// Compute a path from the entity to the current target using A*.
+    fn computePath(self: *AiBehavior, entity: *const Entity) void {
+        const sx = @as(i32, @intFromFloat(@floor(entity.x)));
+        const sy = @as(i32, @intFromFloat(@floor(entity.y)));
+        const sz = @as(i32, @intFromFloat(@floor(entity.z)));
+        const gx = @as(i32, @intFromFloat(@floor(self.target_x)));
+        const gz = @as(i32, @intFromFloat(@floor(self.target_z)));
+
+        const result = pathfinding.findPath(sx, sy, sz, gx, sy, gz);
+        self.path = result.nodes;
+        self.path_length = result.length;
+        self.path_index = 0;
+    }
+
+    /// Walk toward the next node in the cached path. When a node is
+    /// reached, advance to the following one.
+    fn followPath(self: *AiBehavior, entity: *Entity, speed: f32) void {
+        if (self.path_index >= self.path_length) {
+            // Path exhausted; fall back to direct movement toward target.
+            moveToward(entity, self.target_x, self.target_z, speed);
+            return;
+        }
+
+        const node = self.path[self.path_index];
+        // Target the center of the block.
+        const nx: f32 = @as(f32, @floatFromInt(node.x)) + 0.5;
+        const nz: f32 = @as(f32, @floatFromInt(node.z)) + 0.5;
+
+        moveToward(entity, nx, nz, speed);
+
+        // Check if the entity reached this node.
+        const dx = nx - entity.x;
+        const dz = nz - entity.z;
+        if (dx * dx + dz * dz < 0.64) {
+            self.path_index += 1;
+        }
+    }
+
+    /// Returns true when the entire cached path has been walked.
+    fn isPathComplete(self: *const AiBehavior) bool {
+        return self.path_length == 0 or self.path_index >= self.path_length;
+    }
+
+    /// Reset the cached path to empty.
+    fn clearPath(self: *AiBehavior) void {
+        self.path_length = 0;
+        self.path_index = 0;
+        self.path_timer = 0;
     }
 };
 
 // -- Helpers --------------------------------------------------------------
 
 const walk_speed: f32 = 2.0;
+const path_recalc_interval: f32 = 2.0;
 
 fn isHostile(entity_type: EntityType) bool {
     return switch (entity_type) {
@@ -196,11 +274,14 @@ test "wander changes entity velocity" {
     var cow = Entity.init(.cow, 0, 0, 0);
     var ai = AiBehavior.init(.cow);
 
-    // Place directly into wander with a known far-away target.
+    // Place directly into wander with a known far-away target and a path.
     ai.state = .wander;
     ai.state_timer = 5.0;
     ai.target_x = 10.0;
     ai.target_z = 10.0;
+    ai.path[0] = .{ .x = 10, .y = 0, .z = 10 };
+    ai.path_length = 1;
+    ai.path_index = 0;
 
     ai.update(&cow, 100, 0, 100, 0.1);
 
