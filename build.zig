@@ -425,6 +425,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_transparent_pass_tests = b.addRunArtifact(transparent_pass_tests);
 
+    // Piston mechanics tests
+    const piston_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/redstone/piston.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_piston_tests = b.addRunArtifact(piston_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -461,4 +471,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_vehicles_tests.step);
     test_step.dependOn(&run_hud_data_tests.step);
     test_step.dependOn(&run_transparent_pass_tests.step);
+    test_step.dependOn(&run_piston_tests.step);
 }
