@@ -68,6 +68,75 @@ pub const CHEST: BlockId = 43;
 pub const TRAPDOOR: BlockId = 44;
 pub const END_STONE: BlockId = 45;
 
+// -- Mechanical / interactive blocks --
+pub const ANVIL: BlockId = 46;
+pub const BEACON: BlockId = 47;
+pub const BREWING_STAND: BlockId = 48;
+pub const JUKEBOX: BlockId = 49;
+pub const NOTE_BLOCK: BlockId = 50;
+
+// -- Pistons --
+pub const PISTON_BASE: BlockId = 51;
+pub const STICKY_PISTON_BASE: BlockId = 52;
+pub const PISTON_HEAD: BlockId = 53;
+
+// -- Redstone containers --
+pub const HOPPER: BlockId = 54;
+pub const DROPPER: BlockId = 55;
+pub const DISPENSER: BlockId = 56;
+
+// -- Enchanting / End --
+pub const ENCHANTING_TABLE: BlockId = 57;
+pub const END_PORTAL_FRAME: BlockId = 58;
+pub const END_PORTAL: BlockId = 59;
+
+// -- Rails --
+pub const RAIL: BlockId = 60;
+pub const POWERED_RAIL: BlockId = 61;
+pub const DETECTOR_RAIL: BlockId = 62;
+pub const ACTIVATOR_RAIL: BlockId = 63;
+
+// -- Farming --
+pub const FARMLAND: BlockId = 64;
+pub const WHEAT_CROP: BlockId = 65;
+pub const CARROTS_CROP: BlockId = 66;
+pub const POTATOES_CROP: BlockId = 67;
+
+// -- Misc solid --
+pub const MELON_BLOCK: BlockId = 68;
+pub const JACK_O_LANTERN: BlockId = 69;
+pub const HAY_BALE: BlockId = 70;
+
+// -- Wool (16 colors) --
+pub const WHITE_WOOL: BlockId = 71;
+pub const ORANGE_WOOL: BlockId = 72;
+pub const MAGENTA_WOOL: BlockId = 73;
+pub const LIGHT_BLUE_WOOL: BlockId = 74;
+pub const YELLOW_WOOL: BlockId = 75;
+pub const LIME_WOOL: BlockId = 76;
+pub const PINK_WOOL: BlockId = 77;
+pub const GRAY_WOOL: BlockId = 78;
+pub const LIGHT_GRAY_WOOL: BlockId = 79;
+pub const CYAN_WOOL: BlockId = 80;
+pub const PURPLE_WOOL: BlockId = 81;
+pub const BLUE_WOOL: BlockId = 82;
+pub const BROWN_WOOL: BlockId = 83;
+pub const GREEN_WOOL: BlockId = 84;
+pub const RED_WOOL: BlockId = 85;
+pub const BLACK_WOOL: BlockId = 86;
+
+// -- Terracotta (4 representative colors) --
+pub const WHITE_TERRACOTTA: BlockId = 87;
+pub const ORANGE_TERRACOTTA: BlockId = 88;
+pub const RED_TERRACOTTA: BlockId = 89;
+pub const BLACK_TERRACOTTA: BlockId = 90;
+
+// -- Concrete (4 representative colors) --
+pub const WHITE_CONCRETE: BlockId = 91;
+pub const ORANGE_CONCRETE: BlockId = 92;
+pub const RED_CONCRETE: BlockId = 93;
+pub const BLACK_CONCRETE: BlockId = 94;
+
 // Texture atlas indices (placeholder -- will map to real textures later)
 const T_STONE: u16 = 0;
 const T_DIRT: u16 = 1;
@@ -125,12 +194,89 @@ const T_CHEST_TOP: u16 = 52;
 const T_TRAPDOOR: u16 = 53;
 const T_END_STONE: u16 = 54;
 
+// -- New texture indices --
+const T_ANVIL_SIDE: u16 = 55;
+const T_ANVIL_TOP: u16 = 56;
+const T_BEACON: u16 = 57;
+const T_BREWING_STAND: u16 = 58;
+const T_JUKEBOX_SIDE: u16 = 59;
+const T_JUKEBOX_TOP: u16 = 60;
+const T_NOTE_BLOCK: u16 = 61;
+const T_PISTON_BASE_SIDE: u16 = 62;
+const T_PISTON_BASE_TOP: u16 = 63;
+const T_PISTON_BASE_BOTTOM: u16 = 64;
+const T_STICKY_PISTON_TOP: u16 = 65;
+const T_PISTON_HEAD_FACE: u16 = 66;
+const T_PISTON_HEAD_SIDE: u16 = 67;
+const T_HOPPER_SIDE: u16 = 68;
+const T_HOPPER_TOP: u16 = 69;
+const T_DROPPER_FRONT: u16 = 70;
+const T_DROPPER_SIDE: u16 = 71;
+const T_DISPENSER_FRONT: u16 = 72;
+const T_DISPENSER_SIDE: u16 = 73;
+const T_ENCHANTING_TABLE_TOP: u16 = 74;
+const T_ENCHANTING_TABLE_SIDE: u16 = 75;
+const T_ENCHANTING_TABLE_BOTTOM: u16 = 76;
+const T_END_PORTAL_FRAME_SIDE: u16 = 77;
+const T_END_PORTAL_FRAME_TOP: u16 = 78;
+const T_END_PORTAL: u16 = 79;
+const T_RAIL: u16 = 80;
+const T_POWERED_RAIL: u16 = 81;
+const T_DETECTOR_RAIL: u16 = 82;
+const T_ACTIVATOR_RAIL: u16 = 83;
+const T_FARMLAND_TOP: u16 = 84;
+const T_FARMLAND_SIDE: u16 = 85;
+const T_WHEAT: u16 = 86;
+const T_CARROTS: u16 = 87;
+const T_POTATOES: u16 = 88;
+const T_MELON_BLOCK_SIDE: u16 = 89;
+const T_MELON_BLOCK_TOP: u16 = 90;
+const T_JACK_O_LANTERN_FRONT: u16 = 91;
+const T_JACK_O_LANTERN_SIDE: u16 = 92;
+const T_JACK_O_LANTERN_TOP: u16 = 93;
+const T_HAY_BALE_SIDE: u16 = 94;
+const T_HAY_BALE_TOP: u16 = 95;
+const T_WHITE_WOOL: u16 = 96;
+const T_ORANGE_WOOL: u16 = 97;
+const T_MAGENTA_WOOL: u16 = 98;
+const T_LIGHT_BLUE_WOOL: u16 = 99;
+const T_YELLOW_WOOL: u16 = 100;
+const T_LIME_WOOL: u16 = 101;
+const T_PINK_WOOL: u16 = 102;
+const T_GRAY_WOOL: u16 = 103;
+const T_LIGHT_GRAY_WOOL: u16 = 104;
+const T_CYAN_WOOL: u16 = 105;
+const T_PURPLE_WOOL: u16 = 106;
+const T_BLUE_WOOL: u16 = 107;
+const T_BROWN_WOOL: u16 = 108;
+const T_GREEN_WOOL: u16 = 109;
+const T_RED_WOOL: u16 = 110;
+const T_BLACK_WOOL: u16 = 111;
+const T_WHITE_TERRACOTTA: u16 = 112;
+const T_ORANGE_TERRACOTTA: u16 = 113;
+const T_RED_TERRACOTTA: u16 = 114;
+const T_BLACK_TERRACOTTA: u16 = 115;
+const T_WHITE_CONCRETE: u16 = 116;
+const T_ORANGE_CONCRETE: u16 = 117;
+const T_RED_CONCRETE: u16 = 118;
+const T_BLACK_CONCRETE: u16 = 119;
+
 fn allFaces(tex: u16) [6]u16 {
     return .{ tex, tex, tex, tex, tex, tex };
 }
 
 fn topBottomSide(top: u16, bottom: u16, side: u16) [6]u16 {
     return .{ side, side, side, side, top, bottom };
+}
+
+/// North face is `front`, all other faces are `rest`.
+fn frontRest(front: u16, rest: u16) [6]u16 {
+    return .{ front, rest, rest, rest, rest, rest };
+}
+
+/// North face is `front`, top/bottom distinct, remaining sides shared.
+fn frontTopBottomSide(front: u16, top: u16, bottom: u16, side: u16) [6]u16 {
+    return .{ front, side, side, side, top, bottom };
 }
 
 /// Registry: indexed by BlockId
@@ -181,6 +327,75 @@ pub const BLOCKS = [_]BlockDef{
     .{ .name = "chest", .tex = topBottomSide(T_CHEST_TOP, T_CHEST_TOP, T_CHEST_SIDE) }, // 43
     .{ .name = "trapdoor", .tex = allFaces(T_TRAPDOOR), .solid = false }, // 44
     .{ .name = "end_stone", .tex = allFaces(T_END_STONE) }, // 45
+
+    // -- Mechanical / interactive --
+    .{ .name = "anvil", .tex = topBottomSide(T_ANVIL_TOP, T_ANVIL_TOP, T_ANVIL_SIDE) }, // 46
+    .{ .name = "beacon", .tex = allFaces(T_BEACON), .transparent = true }, // 47
+    .{ .name = "brewing_stand", .tex = allFaces(T_BREWING_STAND), .solid = false }, // 48
+    .{ .name = "jukebox", .tex = topBottomSide(T_JUKEBOX_TOP, T_JUKEBOX_SIDE, T_JUKEBOX_SIDE) }, // 49
+    .{ .name = "note_block", .tex = allFaces(T_NOTE_BLOCK) }, // 50
+
+    // -- Pistons --
+    .{ .name = "piston_base", .tex = topBottomSide(T_PISTON_BASE_TOP, T_PISTON_BASE_BOTTOM, T_PISTON_BASE_SIDE) }, // 51
+    .{ .name = "sticky_piston_base", .tex = topBottomSide(T_STICKY_PISTON_TOP, T_PISTON_BASE_BOTTOM, T_PISTON_BASE_SIDE) }, // 52
+    .{ .name = "piston_head", .tex = topBottomSide(T_PISTON_HEAD_FACE, T_PISTON_HEAD_FACE, T_PISTON_HEAD_SIDE) }, // 53
+
+    // -- Redstone containers --
+    .{ .name = "hopper", .tex = topBottomSide(T_HOPPER_TOP, T_HOPPER_TOP, T_HOPPER_SIDE) }, // 54
+    .{ .name = "dropper", .tex = frontRest(T_DROPPER_FRONT, T_DROPPER_SIDE) }, // 55
+    .{ .name = "dispenser", .tex = frontRest(T_DISPENSER_FRONT, T_DISPENSER_SIDE) }, // 56
+
+    // -- Enchanting / End --
+    .{ .name = "enchanting_table", .tex = topBottomSide(T_ENCHANTING_TABLE_TOP, T_ENCHANTING_TABLE_BOTTOM, T_ENCHANTING_TABLE_SIDE) }, // 57
+    .{ .name = "end_portal_frame", .tex = topBottomSide(T_END_PORTAL_FRAME_TOP, T_END_STONE, T_END_PORTAL_FRAME_SIDE) }, // 58
+    .{ .name = "end_portal", .tex = allFaces(T_END_PORTAL), .solid = false, .transparent = true }, // 59
+
+    // -- Rails --
+    .{ .name = "rail", .tex = allFaces(T_RAIL), .solid = false }, // 60
+    .{ .name = "powered_rail", .tex = allFaces(T_POWERED_RAIL), .solid = false }, // 61
+    .{ .name = "detector_rail", .tex = allFaces(T_DETECTOR_RAIL), .solid = false }, // 62
+    .{ .name = "activator_rail", .tex = allFaces(T_ACTIVATOR_RAIL), .solid = false }, // 63
+
+    // -- Farming --
+    .{ .name = "farmland", .tex = topBottomSide(T_FARMLAND_TOP, T_DIRT, T_FARMLAND_SIDE) }, // 64
+    .{ .name = "wheat_crop", .tex = allFaces(T_WHEAT), .solid = false }, // 65
+    .{ .name = "carrots_crop", .tex = allFaces(T_CARROTS), .solid = false }, // 66
+    .{ .name = "potatoes_crop", .tex = allFaces(T_POTATOES), .solid = false }, // 67
+
+    // -- Misc solid --
+    .{ .name = "melon_block", .tex = topBottomSide(T_MELON_BLOCK_TOP, T_MELON_BLOCK_TOP, T_MELON_BLOCK_SIDE) }, // 68
+    .{ .name = "jack_o_lantern", .tex = frontTopBottomSide(T_JACK_O_LANTERN_FRONT, T_JACK_O_LANTERN_TOP, T_PUMPKIN_TOP, T_JACK_O_LANTERN_SIDE) }, // 69
+    .{ .name = "hay_bale", .tex = topBottomSide(T_HAY_BALE_TOP, T_HAY_BALE_TOP, T_HAY_BALE_SIDE) }, // 70
+
+    // -- Wool (16 colors) --
+    .{ .name = "white_wool", .tex = allFaces(T_WHITE_WOOL) }, // 71
+    .{ .name = "orange_wool", .tex = allFaces(T_ORANGE_WOOL) }, // 72
+    .{ .name = "magenta_wool", .tex = allFaces(T_MAGENTA_WOOL) }, // 73
+    .{ .name = "light_blue_wool", .tex = allFaces(T_LIGHT_BLUE_WOOL) }, // 74
+    .{ .name = "yellow_wool", .tex = allFaces(T_YELLOW_WOOL) }, // 75
+    .{ .name = "lime_wool", .tex = allFaces(T_LIME_WOOL) }, // 76
+    .{ .name = "pink_wool", .tex = allFaces(T_PINK_WOOL) }, // 77
+    .{ .name = "gray_wool", .tex = allFaces(T_GRAY_WOOL) }, // 78
+    .{ .name = "light_gray_wool", .tex = allFaces(T_LIGHT_GRAY_WOOL) }, // 79
+    .{ .name = "cyan_wool", .tex = allFaces(T_CYAN_WOOL) }, // 80
+    .{ .name = "purple_wool", .tex = allFaces(T_PURPLE_WOOL) }, // 81
+    .{ .name = "blue_wool", .tex = allFaces(T_BLUE_WOOL) }, // 82
+    .{ .name = "brown_wool", .tex = allFaces(T_BROWN_WOOL) }, // 83
+    .{ .name = "green_wool", .tex = allFaces(T_GREEN_WOOL) }, // 84
+    .{ .name = "red_wool", .tex = allFaces(T_RED_WOOL) }, // 85
+    .{ .name = "black_wool", .tex = allFaces(T_BLACK_WOOL) }, // 86
+
+    // -- Terracotta (4 representative colors) --
+    .{ .name = "white_terracotta", .tex = allFaces(T_WHITE_TERRACOTTA) }, // 87
+    .{ .name = "orange_terracotta", .tex = allFaces(T_ORANGE_TERRACOTTA) }, // 88
+    .{ .name = "red_terracotta", .tex = allFaces(T_RED_TERRACOTTA) }, // 89
+    .{ .name = "black_terracotta", .tex = allFaces(T_BLACK_TERRACOTTA) }, // 90
+
+    // -- Concrete (4 representative colors) --
+    .{ .name = "white_concrete", .tex = allFaces(T_WHITE_CONCRETE) }, // 91
+    .{ .name = "orange_concrete", .tex = allFaces(T_ORANGE_CONCRETE) }, // 92
+    .{ .name = "red_concrete", .tex = allFaces(T_RED_CONCRETE) }, // 93
+    .{ .name = "black_concrete", .tex = allFaces(T_BLACK_CONCRETE) }, // 94
 };
 
 pub fn get(id: BlockId) BlockDef {
@@ -211,8 +426,8 @@ test "grass has different top texture" {
     try std.testing.expect(grass.tex[@intFromEnum(Face.top)] != grass.tex[@intFromEnum(Face.north)]);
 }
 
-test "block registry has 46 entries" {
-    try std.testing.expectEqual(@as(usize, 46), BLOCKS.len);
+test "block registry has 95 entries" {
+    try std.testing.expectEqual(@as(usize, 95), BLOCKS.len);
 }
 
 test "glass is not solid but is transparent" {
@@ -250,10 +465,10 @@ test "all block IDs map to correct names" {
     try std.testing.expectEqualStrings("glowstone", get(GLOWSTONE).name);
 }
 
-test "texture indices fit in u6" {
+test "texture indices fit in u8" {
     for (BLOCKS) |def| {
         for (def.tex) |t| {
-            try std.testing.expect(t < 64);
+            try std.testing.expect(t < 256);
         }
     }
 }
@@ -268,4 +483,53 @@ test "redstone blocks are not solid" {
 
 test "piston is solid" {
     try std.testing.expect(isSolid(PISTON));
+}
+
+test "rails are not solid" {
+    try std.testing.expect(!isSolid(RAIL));
+    try std.testing.expect(!isSolid(POWERED_RAIL));
+    try std.testing.expect(!isSolid(DETECTOR_RAIL));
+    try std.testing.expect(!isSolid(ACTIVATOR_RAIL));
+}
+
+test "crops are not solid" {
+    try std.testing.expect(!isSolid(WHEAT_CROP));
+    try std.testing.expect(!isSolid(CARROTS_CROP));
+    try std.testing.expect(!isSolid(POTATOES_CROP));
+}
+
+test "end portal is non-solid and transparent" {
+    try std.testing.expect(!isSolid(END_PORTAL));
+    try std.testing.expect(isTransparent(END_PORTAL));
+}
+
+test "wool blocks are solid" {
+    try std.testing.expect(isSolid(WHITE_WOOL));
+    try std.testing.expect(isSolid(BLACK_WOOL));
+}
+
+test "terracotta blocks are solid" {
+    try std.testing.expect(isSolid(WHITE_TERRACOTTA));
+    try std.testing.expect(isSolid(BLACK_TERRACOTTA));
+}
+
+test "concrete blocks are solid" {
+    try std.testing.expect(isSolid(WHITE_CONCRETE));
+    try std.testing.expect(isSolid(BLACK_CONCRETE));
+}
+
+test "new block names are correct" {
+    try std.testing.expectEqualStrings("anvil", get(ANVIL).name);
+    try std.testing.expectEqualStrings("beacon", get(BEACON).name);
+    try std.testing.expectEqualStrings("rail", get(RAIL).name);
+    try std.testing.expectEqualStrings("white_wool", get(WHITE_WOOL).name);
+    try std.testing.expectEqualStrings("black_concrete", get(BLACK_CONCRETE).name);
+}
+
+test "brewing stand is non-solid" {
+    try std.testing.expect(!isSolid(BREWING_STAND));
+}
+
+test "last block id matches registry length" {
+    try std.testing.expectEqual(@as(usize, BLACK_CONCRETE + 1), BLOCKS.len);
 }
