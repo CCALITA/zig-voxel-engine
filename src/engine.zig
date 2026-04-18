@@ -57,6 +57,8 @@ pub const copper_mod = @import("gameplay/copper.zig");
 pub const mob_variants_mod = @import("entity/mob_variants.zig");
 pub const advancements_mod = @import("gameplay/advancements.zig");
 pub const pathfinding_mod = @import("entity/pathfinding.zig");
+pub const loot_mod = @import("gameplay/loot_tables.zig");
+pub const recipe_mod = @import("gameplay/recipe_book.zig");
 
 // Batch 9 modules
 pub const world_rules_mod = @import("world/world_rules.zig");
@@ -1364,8 +1366,9 @@ pub const Engine = struct {
         return tools_mod.getMiningSpeed(tool_def, @intCast(block_id));
     }
 
-    /// Quick-craft: when C is pressed, try to auto-craft the first matching recipe
-    /// from materials in the inventory.
+    /// Quick-craft: when C is pressed, try to auto-craft the first matching recipe.
+    /// Checks the grid-based CraftingRegistry first, then falls back to the
+    /// shapeless recipe book for broader coverage.
     fn handleQuickCraft(self: *Engine) void {
         const c_pressed = self.window.handle.getKey(.c) == .press;
         const c_just_pressed = c_pressed and !self.last_craft_key;
@@ -1373,9 +1376,19 @@ pub const Engine = struct {
 
         if (!c_just_pressed) return;
 
+        // 1. Try grid-based CraftingRegistry recipes first
         for (self.crafting_registry.recipes.items) |recipe| {
             if (self.canCraftRecipe(recipe)) {
                 self.consumeRecipeInputs(recipe);
+                _ = self.inventory.addItem(recipe.result_item, recipe.result_count);
+                return;
+            }
+        }
+
+        // 2. Fall back to shapeless recipe book
+        for (&recipe_mod.recipes) |*recipe| {
+            if (recipe_mod.canCraftFromSlots(recipe, &self.inventory.slots)) {
+                recipe_mod.consumeFromSlots(recipe, &self.inventory.slots);
                 _ = self.inventory.addItem(recipe.result_item, recipe.result_count);
                 return;
             }
@@ -1678,27 +1691,18 @@ pub const Engine = struct {
         // Achievement: first block break
         _ = self.achievements.unlock(.mine_wood);
 
-        // XP reward for ore mining
-        const xp_reward: u32 = switch (old_block) {
-            block.COAL_ORE => xp_mod.XP_COAL_ORE,
-            block.IRON_ORE => xp_mod.XP_IRON_ORE,
-            block.GOLD_ORE => xp_mod.XP_GOLD_ORE,
-            block.DIAMOND_ORE => xp_mod.XP_DIAMOND_ORE,
-            block.REDSTONE_ORE => xp_mod.XP_REDSTONE_ORE,
-            else => 0,
-        };
-        if (xp_reward > 0) {
-            self.xp.addXP(xp_reward);
-            // Achievement: first ore mined
+        // Achievement: ore / diamond mined
+        if (old_block == block.COAL_ORE or old_block == block.IRON_ORE or
+            old_block == block.GOLD_ORE or old_block == block.DIAMOND_ORE or
+            old_block == block.REDSTONE_ORE)
+        {
             _ = self.achievements.unlock(.mine_stone);
         }
-
-        // Achievement: diamond ore mined
         if (old_block == block.DIAMOND_ORE) {
             _ = self.achievements.unlock(.mine_diamond);
         }
 
-        // Spawn an item drop if the block was not air
+        // Spawn item drops via loot table
         if (old_block != block.AIR) {
             const fx: f32 = @as(f32, @floatFromInt(wx)) + 0.5;
             const fy: f32 = @as(f32, @floatFromInt(wy)) + 0.5;
@@ -1708,7 +1712,17 @@ pub const Engine = struct {
             const color = getBlockColor(old_block);
             self.particle_manager.emitBlockBreak(fx, fy, fz, color[0], color[1], color[2]);
 
-            self.drop_manager.spawnDrop(fx, fy, fz, @as(u16, old_block), 1) catch {};
+            const loot = loot_mod.getBlockLoot(old_block);
+            const fortune: u8 = 0; // TODO: get from equipped tool
+            const result = loot_mod.rollLoot(loot, fortune, @intCast(self.game_time.tick));
+            for (0..result.item_count) |i| {
+                if (result.items[i]) |item| {
+                    if (item.count > 0) {
+                        self.drop_manager.spawnDrop(fx, fy, fz, item.id, item.count) catch {};
+                    }
+                }
+            }
+            if (result.xp > 0) self.xp.addXP(result.xp);
         }
 
         self.remeshAffectedChunks(wx, wz);
@@ -2227,4 +2241,12 @@ test "advancements module" {
 
 test "pathfinding module" {
     _ = pathfinding_mod;
+}
+
+test "loot_tables module" {
+    _ = loot_mod;
+}
+
+test "recipe_book module" {
+    _ = recipe_mod;
 }
