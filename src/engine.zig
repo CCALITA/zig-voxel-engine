@@ -43,6 +43,7 @@ pub const block_interact = @import("world/block_interact.zig");
 pub const scoreboard_mod = @import("gameplay/scoreboard.zig");
 pub const tools_mod = @import("gameplay/tools.zig");
 pub const food_mod = @import("gameplay/food.zig");
+pub const taming_mod = @import("entity/taming.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -1661,4 +1662,8 @@ test "tools module" {
 
 test "food module" {
     _ = food_mod;
+}
+
+test "taming module" {
+    _ = taming_mod;
 }
