@@ -5,6 +5,7 @@
 const std = @import("std");
 
 pub const BOOKSHELF_BLOCK_ID: u8 = 21;
+pub const LAPIS_ITEM_ID: u8 = 22;
 const MAX_BOOKSHELVES: u8 = 15;
 
 pub const EnchantOffer = struct {
