@@ -401,6 +401,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_taming_tests = b.addRunArtifact(taming_tests);
 
+    // Decoration entity tests
+    const decorations_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/entity/decorations.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_decorations_tests = b.addRunArtifact(decorations_tests);
+
     // Vehicle system tests
     const vehicles_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -479,6 +489,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_villager_tests.step);
     test_step.dependOn(&run_spawner_tests.step);
     test_step.dependOn(&run_taming_tests.step);
+    test_step.dependOn(&run_decorations_tests.step);
     test_step.dependOn(&run_vehicles_tests.step);
     test_step.dependOn(&run_hud_data_tests.step);
     test_step.dependOn(&run_transparent_pass_tests.step);
