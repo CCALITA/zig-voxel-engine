@@ -3,6 +3,7 @@
 /// Smithing Table, and Fletching Table. Only depends on `std`.
 
 const std = @import("std");
+const dyes = @import("dyes.zig");
 
 // ── Shared types ─────────────────────────────────────────────────────────
 
@@ -206,24 +207,7 @@ pub fn stonecutterRecipeCount() usize {
 
 pub const MAX_BANNER_LAYERS = 6;
 
-pub const DyeColor = enum(u4) {
-    white = 0,
-    orange = 1,
-    magenta = 2,
-    light_blue = 3,
-    yellow = 4,
-    lime = 5,
-    pink = 6,
-    gray = 7,
-    light_gray = 8,
-    cyan = 9,
-    purple = 10,
-    blue = 11,
-    brown = 12,
-    green = 13,
-    red = 14,
-    black = 15,
-};
+pub const DyeColor = dyes.DyeColor;
 
 pub const BannerPattern = enum {
     stripe_top,
