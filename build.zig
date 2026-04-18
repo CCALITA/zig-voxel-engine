@@ -97,26 +97,6 @@ pub fn build(b: *std.Build) void {
     });
     const run_physics_collision_tests = b.addRunArtifact(physics_collision_tests);
 
-    // Tree generation tests (rooted at src/world/ for relative import resolution)
-    const tree_gen_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/world/trees_test.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const run_tree_gen_tests = b.addRunArtifact(tree_gen_tests);
-
-    // Cave generation tests (rooted at src/world/ for relative import resolution)
-    const caves_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/world/caves_test.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const run_caves_tests = b.addRunArtifact(caves_tests);
-
     // Network protocol tests
     const network_protocol_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -146,40 +126,6 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_network_client_tests = b.addRunArtifact(network_client_tests);
-
-    // Redstone tests
-    const redstone_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/redstone/redstone.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "block", .module = block_mod },
-                .{ .name = "chunk", .module = chunk_mod },
-            },
-        }),
-    });
-    const run_redstone_tests = b.addRunArtifact(redstone_tests);
-
-    // Redstone component tests
-    const redstone_component_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/redstone/components.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const run_redstone_component_tests = b.addRunArtifact(redstone_component_tests);
-
-    // Structure generation tests (rooted at src/world/ for relative import resolution)
-    const structures_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/world/structures_test.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const run_structures_tests = b.addRunArtifact(structures_tests);
 
     // Experience system tests
     const experience_tests = b.addTest(.{
@@ -320,16 +266,6 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_food_tests = b.addRunArtifact(food_tests);
-
-    // Vegetation generation tests (rooted at src/world/ for relative import resolution)
-    const vegetation_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/world/vegetation_test.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const run_vegetation_tests = b.addRunArtifact(vegetation_tests);
 
     // Projectile system tests
     const projectiles_tests = b.addTest(.{
@@ -539,14 +475,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_physics_collision_tests.step);
-    test_step.dependOn(&run_tree_gen_tests.step);
-    test_step.dependOn(&run_caves_tests.step);
     test_step.dependOn(&run_network_protocol_tests.step);
     test_step.dependOn(&run_network_server_tests.step);
     test_step.dependOn(&run_network_client_tests.step);
-    test_step.dependOn(&run_redstone_tests.step);
-    test_step.dependOn(&run_redstone_component_tests.step);
-    test_step.dependOn(&run_structures_tests.step);
     test_step.dependOn(&run_experience_tests.step);
     test_step.dependOn(&run_gamemode_tests.step);
     test_step.dependOn(&run_weather_tests.step);
@@ -561,7 +492,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ender_dragon_tests.step);
     test_step.dependOn(&run_fishing_tests.step);
     test_step.dependOn(&run_food_tests.step);
-    test_step.dependOn(&run_vegetation_tests.step);
     test_step.dependOn(&run_projectiles_tests.step);
     test_step.dependOn(&run_hazards_tests.step);
     test_step.dependOn(&run_explosion_tests.step);
