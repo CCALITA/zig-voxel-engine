@@ -361,6 +361,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_explosion_tests = b.addRunArtifact(explosion_tests);
 
+    // Mob spawner tests
+    const spawner_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/entity/spawner.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_spawner_tests = b.addRunArtifact(spawner_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -391,4 +401,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_projectiles_tests.step);
     test_step.dependOn(&run_hazards_tests.step);
     test_step.dependOn(&run_explosion_tests.step);
+    test_step.dependOn(&run_spawner_tests.step);
 }
