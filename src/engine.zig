@@ -48,6 +48,14 @@ pub const explosion_mod = @import("gameplay/explosion.zig");
 pub const projectiles_mod = @import("gameplay/projectiles.zig");
 pub const spawner_mod = @import("entity/spawner.zig");
 pub const taming_mod = @import("entity/taming.zig");
+pub const banners_mod = @import("gameplay/banners.zig");
+pub const command_block_mod = @import("gameplay/command_block.zig");
+pub const crafting_stations_mod = @import("gameplay/crafting_stations.zig");
+pub const storage_mod = @import("gameplay/storage.zig");
+pub const cooking_mod = @import("gameplay/cooking.zig");
+pub const copper_mod = @import("gameplay/copper.zig");
+pub const mob_variants_mod = @import("entity/mob_variants.zig");
+pub const advancements_mod = @import("gameplay/advancements.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -69,6 +77,21 @@ const PLAYER_WIDTH: f32 = 0.6;
 const PLAYER_HEIGHT: f32 = 1.8;
 const PLAYER_HALF_W: f32 = PLAYER_WIDTH / 2.0;
 const PLAYER_EYE_HEIGHT: f32 = 1.6;
+
+pub const DebugInfo = struct {
+    fps: f32,
+    frame_time_ms: f32,
+    player_x: f32,
+    player_y: f32,
+    player_z: f32,
+    chunk_x: i32,
+    chunk_z: i32,
+    loaded_chunks: u32,
+    entity_count: u32,
+    dimension: []const u8,
+    biome: []const u8,
+    facing_direction: []const u8,
+};
 
 pub const Engine = struct {
     allocator: std.mem.Allocator,
@@ -169,6 +192,28 @@ pub const Engine = struct {
 
     // Food eating (held right-click consumption)
     eating_progress: f32 = 0.0,
+
+    // F3 debug overlay data
+    debug_info: DebugInfo = .{
+        .fps = 0.0,
+        .frame_time_ms = 0.0,
+        .player_x = 0.0,
+        .player_y = 0.0,
+        .player_z = 0.0,
+        .chunk_x = 0,
+        .chunk_z = 0,
+        .loaded_chunks = 0,
+        .entity_count = 0,
+        .dimension = "overworld",
+        .biome = "plains",
+        .facing_direction = "north",
+    },
+    show_debug: bool = false,
+    last_f3_press: bool = false,
+
+    // Copper oxidation random-tick timer and frame counter for hash variation
+    copper_tick_timer: f32 = 0.0,
+    copper_tick_count: u32 = 0,
 
     const FurnaceEntry = struct {
         x: i32,
@@ -408,8 +453,18 @@ pub const Engine = struct {
             if (f1_pressed and !self.last_f1_press) {
                 const new_mode: gamemode_mod.GameMode = if (self.gamemode.current == .survival) .creative else .survival;
                 self.gamemode.setMode(new_mode);
+                if (new_mode == .creative) {
+                    self.fillCreativeInventory();
+                }
             }
             self.last_f1_press = f1_pressed;
+
+            // F3 debug overlay toggle
+            const f3_pressed = self.window.handle.getKey(.F3) == .press;
+            if (f3_pressed and !self.last_f3_press) {
+                self.show_debug = !self.show_debug;
+            }
+            self.last_f3_press = f3_pressed;
 
             // Double-space toggles flight in creative mode
             const space_pressed = self.window.handle.getKey(.space) == .press;
@@ -709,10 +764,98 @@ pub const Engine = struct {
             self.stat_tracker.addDistance(move_x, move_z, self.movement.mode == .sprint);
             self.stat_tracker.addPlayTime(dt);
 
+            // Copper oxidation random ticks (sample a few blocks per second)
+            self.copper_tick_timer += dt;
+            if (self.copper_tick_timer >= 1.0) {
+                self.tickCopperOxidation();
+                self.copper_tick_timer = 0.0;
+            }
+
+            // Update F3 debug info (only when overlay is visible)
+            if (self.show_debug) {
+                self.updateDebugInfo(dt);
+            }
+
             self.renderFrame(dt);
         }
 
         self.renderer.waitIdle();
+    }
+
+    /// Fill all 36 inventory slots with one of each block type (creative mode).
+    /// Cycles through all solid, placeable block IDs.
+    fn fillCreativeInventory(self: *Engine) void {
+        const total_blocks = block.BLOCKS.len;
+        var slot_idx: u8 = 0;
+        var block_idx: usize = 1; // skip AIR (0)
+        while (slot_idx < inventory_mod.SLOT_COUNT and block_idx < total_blocks) {
+            self.inventory.slots[slot_idx] = .{
+                .item = @intCast(block_idx),
+                .count = 64,
+            };
+            slot_idx += 1;
+            block_idx += 1;
+        }
+    }
+
+    /// Tick copper oxidation: for each loaded chunk section, sample a small number
+    /// of random block positions and advance copper blocks probabilistically.
+    fn tickCopperOxidation(self: *Engine) void {
+        self.copper_tick_count +%= 1;
+        const tick = self.copper_tick_count;
+        const SAMPLES_PER_SECTION: u32 = 3;
+
+        var iter = self.chunks.iterator();
+        while (iter.next()) |entry| {
+            const col = entry.value_ptr;
+            const cx = entry.key_ptr.x;
+            const cz = entry.key_ptr.z;
+            for (0..ChunkColumn.SECTIONS) |si| {
+                const section = col.getSection(@intCast(si)) orelse continue;
+                // Sample a few pseudo-random positions per section per tick
+                for (0..SAMPLES_PER_SECTION) |sample| {
+                    const seed = tick *% 1664525 +% @as(u32, @intCast(sample)) *% 1013904223 +%
+                        @as(u32, @bitCast(cx *% 73856093 +% cz *% 19349663 +%
+                        @as(i32, @intCast(si)) *% 83492791));
+                    const lx: u4 = @truncate(seed);
+                    const ly: u4 = @truncate(seed >> 4);
+                    const lz: u4 = @truncate(seed >> 8);
+
+                    const bid = section.getBlock(lx, ly, lz);
+                    if (copper_mod.getNextStage(bid)) |next_bid| {
+                        const wx = cx * @as(i32, Chunk.SIZE) + @as(i32, lx);
+                        const wy = @as(i32, @intCast(si * Chunk.SIZE)) + @as(i32, ly);
+                        const wz = cz * @as(i32, Chunk.SIZE) + @as(i32, lz);
+                        _ = self.setWorldBlock(wx, wy, wz, next_bid);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Update the F3 debug info struct with current frame data.
+    fn updateDebugInfo(self: *Engine, dt: f32) void {
+        const size_i32: i32 = @intCast(Chunk.SIZE);
+        const fps = if (dt > 0.0) 1.0 / dt else 0.0;
+
+        self.debug_info = .{
+            .fps = fps,
+            .frame_time_ms = dt * 1000.0,
+            .player_x = self.player_x,
+            .player_y = self.player_y,
+            .player_z = self.player_z,
+            .chunk_x = @divFloor(@as(i32, @intFromFloat(@floor(self.player_x))), size_i32),
+            .chunk_z = @divFloor(@as(i32, @intFromFloat(@floor(self.player_z))), size_i32),
+            .loaded_chunks = self.chunks.count(),
+            .entity_count = @intCast(self.mob_manager.count()),
+            .dimension = switch (self.current_dimension) {
+                .overworld => "overworld",
+                .nether => "the_nether",
+                .the_end => "the_end",
+            },
+            .biome = "plains",
+            .facing_direction = getFacingDirection(self.camera.yaw),
+        };
     }
 
     /// Spawn item drops for any mobs that have just died (alive == false).
@@ -1404,6 +1547,7 @@ pub const Engine = struct {
             block.TNT => 0.0, // instant
             block.FURNACE => 3.5,
             block.BEDROCK => 999.0, // effectively unbreakable
+            block.COPPER_BLOCK, block.EXPOSED_COPPER, block.WEATHERED_COPPER, block.OXIDIZED_COPPER => 3.0,
             else => 1.0, // default for unlisted blocks
         };
     }
@@ -1703,8 +1847,25 @@ fn getBlockColor(block_id: block.BlockId) [3]f32 {
         block.LADDER => .{ 0.55, 0.40, 0.25 },
         block.CHEST => .{ 0.55, 0.40, 0.20 },
         block.TRAPDOOR => .{ 0.50, 0.38, 0.22 },
+        block.COPPER_BLOCK => .{ 0.73, 0.45, 0.30 },
+        block.EXPOSED_COPPER => .{ 0.60, 0.50, 0.40 },
+        block.WEATHERED_COPPER => .{ 0.45, 0.55, 0.45 },
+        block.OXIDIZED_COPPER => .{ 0.35, 0.60, 0.55 },
         else => .{ 0.50, 0.50, 0.50 },
     };
+}
+
+/// Convert a yaw angle (radians) to a cardinal direction string.
+fn getFacingDirection(yaw: f32) []const u8 {
+    const pi = std.math.pi;
+    // Normalize yaw to [0, 2*pi); @mod already returns non-negative for positive divisor
+    const angle = @mod(yaw, 2.0 * pi);
+
+    // yaw=0 looks down -Z (north), pi/2 = west, pi = south, 3pi/2 = east
+    if (angle < pi / 4.0 or angle >= 7.0 * pi / 4.0) return "north";
+    if (angle < 3.0 * pi / 4.0) return "west";
+    if (angle < 5.0 * pi / 4.0) return "south";
+    return "east";
 }
 
 test "subsystem count" {
@@ -1877,4 +2038,36 @@ test "spawner module" {
 
 test "taming module" {
     _ = taming_mod;
+}
+
+test "banners module" {
+    _ = banners_mod;
+}
+
+test "command_block module" {
+    _ = command_block_mod;
+}
+
+test "crafting_stations module" {
+    _ = crafting_stations_mod;
+}
+
+test "storage module" {
+    _ = storage_mod;
+}
+
+test "cooking module" {
+    _ = cooking_mod;
+}
+
+test "copper module" {
+    _ = copper_mod;
+}
+
+test "mob_variants module" {
+    _ = mob_variants_mod;
+}
+
+test "advancements module" {
+    _ = advancements_mod;
 }
