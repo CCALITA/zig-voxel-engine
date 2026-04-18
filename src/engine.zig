@@ -45,6 +45,7 @@ pub const tools_mod = @import("gameplay/tools.zig");
 pub const food_mod = @import("gameplay/food.zig");
 pub const hazards_mod = @import("gameplay/hazards.zig");
 pub const explosion_mod = @import("gameplay/explosion.zig");
+pub const projectiles_mod = @import("gameplay/projectiles.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -154,6 +155,10 @@ pub const Engine = struct {
 
     // Active TNT fuses
     active_tnt: std.ArrayList(explosion_mod.TNTState),
+
+    // Projectile system (arrows, thrown items)
+    projectile_manager: projectiles_mod.ProjectileManager,
+    skeleton_shoot_timer: f32,
 
     // Mining progress (held left-click block breaking)
     mining_progress: f32 = 0.0,
@@ -316,6 +321,8 @@ pub const Engine = struct {
             .last_t_press = false,
             .stat_tracker = scoreboard_mod.StatTracker.init(),
             .active_tnt = .empty,
+            .projectile_manager = projectiles_mod.ProjectileManager.init(),
+            .skeleton_shoot_timer = 0.0,
             .mining_progress = 0.0,
             .mining_target = null,
             .eating_progress = 0.0,
@@ -587,10 +594,31 @@ pub const Engine = struct {
 
             // Hostile mob melee attacks on the player
             if (self.gamemode.takesBlockDamage()) {
+                self.skeleton_shoot_timer += dt;
                 for (self.mob_manager.entities.items) |*mob| {
                     if (!mob.alive) continue;
                     if (!mob.entity_type.isHostile()) continue;
                     const dist = mob.distanceToPoint(self.player_x, self.player_y, self.player_z);
+
+                    // Skeleton ranged attack: shoot arrow every 2 seconds
+                    if (mob.entity_type == .skeleton and dist < 16.0 and dist > 3.0) {
+                        if (self.skeleton_shoot_timer >= 2.0) {
+                            const sdx = self.player_x - mob.x;
+                            const sdy = (self.player_y + PLAYER_EYE_HEIGHT) - (mob.y + 1.5);
+                            const sdz = self.player_z - mob.z;
+                            const slen = @sqrt(sdx * sdx + sdy * sdy + sdz * sdz);
+                            if (slen > 0.01) {
+                                _ = self.projectile_manager.spawn(
+                                    .arrow,
+                                    .{ mob.x, mob.y + 1.5, mob.z },
+                                    .{ sdx / slen, sdy / slen, sdz / slen },
+                                    20.0,
+                                );
+                            }
+                        }
+                    }
+
+                    // Melee attack
                     if (dist < 2.0) {
                         const damage: f32 = switch (mob.entity_type) {
                             .zombie => 3.0,
@@ -602,6 +630,29 @@ pub const Engine = struct {
                             const reduced = self.armor.getDamageReduction(damage);
                             self.player_stats.takeDamage(damage - reduced);
                         }
+                    }
+                }
+                // Reset shoot timer after processing all skeletons
+                if (self.skeleton_shoot_timer >= 2.0) {
+                    self.skeleton_shoot_timer = 0.0;
+                }
+            }
+
+            // Update projectile simulation
+            self.projectile_manager.update(dt);
+
+            // Arrow-player collision: check active projectiles against player
+            if (self.gamemode.takesBlockDamage()) {
+                for (&self.projectile_manager.pool) |*proj| {
+                    if (!proj.active) continue;
+                    const pdx = proj.x - self.player_x;
+                    const pdy = proj.y - (self.player_y + 1.0);
+                    const pdz = proj.z - self.player_z;
+                    if (pdx * pdx + pdy * pdy + pdz * pdz < 1.0) {
+                        const proj_reduced = self.armor.getDamageReduction(proj.damage);
+                        self.player_stats.takeDamage(proj.damage - proj_reduced);
+                        self.stat_tracker.increment(.damage_taken, 1);
+                        proj.active = false;
                     }
                 }
             }
@@ -1794,4 +1845,8 @@ test "hazards module" {
 
 test "explosion module" {
     _ = explosion_mod;
+}
+
+test "projectiles module" {
+    _ = projectiles_mod;
 }
