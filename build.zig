@@ -461,6 +461,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_mob_variants_tests = b.addRunArtifact(mob_variants_tests);
 
+    // NBT serialization tests
+    const nbt_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/data/nbt.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_nbt_tests = b.addRunArtifact(nbt_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -501,4 +511,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_advancements_tests.step);
     test_step.dependOn(&run_crafting_stations_tests.step);
     test_step.dependOn(&run_mob_variants_tests.step);
+    test_step.dependOn(&run_nbt_tests.step);
 }
