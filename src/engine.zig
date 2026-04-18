@@ -46,6 +46,7 @@ pub const food_mod = @import("gameplay/food.zig");
 pub const hazards_mod = @import("gameplay/hazards.zig");
 pub const explosion_mod = @import("gameplay/explosion.zig");
 pub const projectiles_mod = @import("gameplay/projectiles.zig");
+pub const spawner_mod = @import("entity/spawner.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -100,6 +101,7 @@ pub const Engine = struct {
 
     // Entity/mob system
     mob_manager: mob_mod.MobManager,
+    mob_spawner: spawner_mod.MobSpawner,
 
     // Health and water physics
     player_stats: health_mod.PlayerStats,
@@ -247,8 +249,8 @@ pub const Engine = struct {
             _ = inventory.addItem(@as(inventory_mod.ItemId, bid), 64);
         }
 
-        // Initialize mob manager and spawn initial mobs
-        var mob_manager = mob_mod.MobManager.init(allocator);
+        // Initialize mob manager (spawning handled by mob_spawner per-frame)
+        const mob_manager = mob_mod.MobManager.init(allocator);
 
         // Initialize persistence
         const persistence = try persistence_mod.WorldPersistence.init(allocator, "default");
@@ -259,16 +261,6 @@ pub const Engine = struct {
         // Initialize crafting registry with default recipes
         var crafting_registry = crafting_mod.CraftingRegistry.init();
         try crafting_registry.registerDefaults(allocator);
-
-        // Spawn some passive mobs near the player
-        const spawn_types = [_]entity_mod.EntityType{ .pig, .cow, .sheep, .chicken };
-        for (spawn_types) |mob_type| {
-            try mob_manager.spawn(mob_type, 20.0, 70.0, 20.0);
-            try mob_manager.spawn(mob_type, -10.0, 70.0, 15.0);
-        }
-        // Spawn a few hostile mobs further away
-        try mob_manager.spawn(.zombie, 40.0, 70.0, 40.0);
-        try mob_manager.spawn(.skeleton, -30.0, 70.0, -30.0);
 
         return .{
             .allocator = allocator,
@@ -292,6 +284,7 @@ pub const Engine = struct {
             .inventory = inventory,
             .game_time = .{},
             .mob_manager = mob_manager,
+            .mob_spawner = spawner_mod.MobSpawner.init(SEED),
             .player_stats = health_mod.PlayerStats.init(),
             .water_state = water_mod.WaterState.init(),
             .persistence = persistence,
@@ -591,6 +584,32 @@ pub const Engine = struct {
 
             // Update mob AI and remove dead entities
             self.mob_manager.update(self.player_x, self.player_y, self.player_z, dt);
+
+            // Per-frame mob spawning via spawner
+            if (self.mob_spawner.update(dt)) {
+                const is_night = self.game_time.getPhase() == .night;
+                const mob_count: u32 = @intCast(self.mob_manager.count());
+                const attempts = self.mob_spawner.getSpawnAttempts(
+                    self.player_x,
+                    self.player_z,
+                    is_night,
+                    mob_count,
+                    mob_count,
+                );
+                for (attempts) |maybe_attempt| {
+                    if (maybe_attempt) |attempt| {
+                        const etype: entity_mod.EntityType = @enumFromInt(attempt.entity_type);
+                        self.mob_manager.spawn(etype, attempt.x, attempt.y, attempt.z) catch {};
+                    }
+                }
+            }
+
+            // Despawn mobs that are too far from the player
+            for (self.mob_manager.entities.items) |*mob| {
+                if (mob.alive and self.mob_spawner.shouldDespawn(mob.x, mob.z, self.player_x, self.player_z)) {
+                    mob.alive = false;
+                }
+            }
 
             // Hostile mob melee attacks on the player
             if (self.gamemode.takesBlockDamage()) {
@@ -1849,4 +1868,8 @@ test "explosion module" {
 
 test "projectiles module" {
     _ = projectiles_mod;
+}
+
+test "spawner module" {
+    _ = spawner_mod;
 }
