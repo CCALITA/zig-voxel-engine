@@ -475,6 +475,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_piston_tests = b.addRunArtifact(piston_tests);
 
+    // Advancements system tests
+    const advancements_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/advancements.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_advancements_tests = b.addRunArtifact(advancements_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -516,4 +526,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_world_rules_tests.step);
     test_step.dependOn(&run_automation_tests.step);
     test_step.dependOn(&run_piston_tests.step);
+    test_step.dependOn(&run_advancements_tests.step);
 }
