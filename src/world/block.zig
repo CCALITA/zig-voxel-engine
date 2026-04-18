@@ -137,6 +137,12 @@ pub const ORANGE_CONCRETE: BlockId = 92;
 pub const RED_CONCRETE: BlockId = 93;
 pub const BLACK_CONCRETE: BlockId = 94;
 
+// -- Copper (4 oxidation stages) --
+pub const COPPER_BLOCK: BlockId = 95;
+pub const EXPOSED_COPPER: BlockId = 96;
+pub const WEATHERED_COPPER: BlockId = 97;
+pub const OXIDIZED_COPPER: BlockId = 98;
+
 // Texture atlas indices (placeholder -- will map to real textures later)
 const T_STONE: u16 = 0;
 const T_DIRT: u16 = 1;
@@ -260,6 +266,10 @@ const T_WHITE_CONCRETE: u16 = 116;
 const T_ORANGE_CONCRETE: u16 = 117;
 const T_RED_CONCRETE: u16 = 118;
 const T_BLACK_CONCRETE: u16 = 119;
+const T_COPPER_BLOCK: u16 = 120;
+const T_EXPOSED_COPPER: u16 = 121;
+const T_WEATHERED_COPPER: u16 = 122;
+const T_OXIDIZED_COPPER: u16 = 123;
 
 fn allFaces(tex: u16) [6]u16 {
     return .{ tex, tex, tex, tex, tex, tex };
@@ -396,6 +406,12 @@ pub const BLOCKS = [_]BlockDef{
     .{ .name = "orange_concrete", .tex = allFaces(T_ORANGE_CONCRETE) }, // 92
     .{ .name = "red_concrete", .tex = allFaces(T_RED_CONCRETE) }, // 93
     .{ .name = "black_concrete", .tex = allFaces(T_BLACK_CONCRETE) }, // 94
+
+    // -- Copper (4 oxidation stages) --
+    .{ .name = "copper_block", .tex = allFaces(T_COPPER_BLOCK) }, // 95
+    .{ .name = "exposed_copper", .tex = allFaces(T_EXPOSED_COPPER) }, // 96
+    .{ .name = "weathered_copper", .tex = allFaces(T_WEATHERED_COPPER) }, // 97
+    .{ .name = "oxidized_copper", .tex = allFaces(T_OXIDIZED_COPPER) }, // 98
 };
 
 pub fn get(id: BlockId) BlockDef {
@@ -426,8 +442,8 @@ test "grass has different top texture" {
     try std.testing.expect(grass.tex[@intFromEnum(Face.top)] != grass.tex[@intFromEnum(Face.north)]);
 }
 
-test "block registry has 95 entries" {
-    try std.testing.expectEqual(@as(usize, 95), BLOCKS.len);
+test "block registry has 99 entries" {
+    try std.testing.expectEqual(@as(usize, 99), BLOCKS.len);
 }
 
 test "glass is not solid but is transparent" {
@@ -531,5 +547,5 @@ test "brewing stand is non-solid" {
 }
 
 test "last block id matches registry length" {
-    try std.testing.expectEqual(@as(usize, BLACK_CONCRETE + 1), BLOCKS.len);
+    try std.testing.expectEqual(@as(usize, OXIDIZED_COPPER + 1), BLOCKS.len);
 }
