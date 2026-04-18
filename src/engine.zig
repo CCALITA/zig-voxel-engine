@@ -49,6 +49,20 @@ pub const projectiles_mod = @import("gameplay/projectiles.zig");
 pub const spawner_mod = @import("entity/spawner.zig");
 pub const taming_mod = @import("entity/taming.zig");
 
+// Batch 9 modules
+pub const world_rules_mod = @import("world/world_rules.zig");
+pub const biome_features_mod = @import("world/biome_features.zig");
+pub const enchant_table_mod = @import("gameplay/enchant_table.zig");
+pub const piston_mod = @import("redstone/piston.zig");
+pub const anvil_mod = @import("gameplay/anvil.zig");
+pub const beacon_mod = @import("gameplay/beacon.zig");
+pub const brewing_stand_mod = @import("gameplay/brewing_stand.zig");
+pub const decorations_mod = @import("world/decorations.zig");
+pub const ender_items_mod = @import("gameplay/ender_items.zig");
+pub const music_mod = @import("gameplay/music.zig");
+pub const map_item_mod = @import("gameplay/map_item.zig");
+pub const automation_mod = @import("gameplay/automation.zig");
+
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
 
@@ -63,6 +77,9 @@ const ITEM_RAW_CHICKEN: u16 = 206;
 const ITEM_FEATHER: u16 = 207;
 const ITEM_WOOL: u16 = 208;
 const ITEM_RAW_MUTTON: u16 = 209;
+
+// Enchanting table block ID (placeholder until added to block.zig)
+const ENCHANTING_TABLE_BLOCK_ID: u8 = 47;
 
 // Player dimensions (shared between collision and block placement)
 const PLAYER_WIDTH: f32 = 0.6;
@@ -162,6 +179,9 @@ pub const Engine = struct {
     // Projectile system (arrows, thrown items)
     projectile_manager: projectiles_mod.ProjectileManager,
     skeleton_shoot_timer: f32,
+
+    // World rules (difficulty, spawn, border)
+    world_rules: world_rules_mod.WorldRules,
 
     // Mining progress (held left-click block breaking)
     mining_progress: f32 = 0.0,
@@ -317,6 +337,7 @@ pub const Engine = struct {
             .active_tnt = .empty,
             .projectile_manager = projectiles_mod.ProjectileManager.init(),
             .skeleton_shoot_timer = 0.0,
+            .world_rules = world_rules_mod.WorldRules.init(),
             .mining_progress = 0.0,
             .mining_target = null,
             .eating_progress = 0.0,
@@ -372,9 +393,10 @@ pub const Engine = struct {
             if (self.player_stats.is_dead) {
                 if (self.window.handle.getKey(.r) == .press) {
                     self.player_stats = health_mod.PlayerStats.init();
-                    self.player_x = 8.0;
-                    self.player_y = 70.0;
-                    self.player_z = 8.0;
+                    const spawn = self.world_rules.getSpawnPoint();
+                    self.player_x = spawn.x;
+                    self.player_y = spawn.y;
+                    self.player_z = spawn.z;
                     self.player_vy = 0.0;
                     self.on_ground = false;
                 }
@@ -577,6 +599,13 @@ pub const Engine = struct {
                 }
             }
 
+            // World border damage: hurt player when outside the border
+            if (self.gamemode.takesBlockDamage() and self.world_rules.isOutsideBorder(self.player_x, self.player_z)) {
+                const border_dmg = self.world_rules.getBorderDamage() * dt;
+                self.player_stats.takeDamage(border_dmg);
+                self.stat_tracker.increment(.damage_taken, 1);
+            }
+
             // Update active TNT fuses; explode when fuse expires
             self.updateActiveTNT(dt);
 
@@ -640,12 +669,13 @@ pub const Engine = struct {
 
                     // Melee attack
                     if (dist < 2.0) {
-                        const damage: f32 = switch (mob.entity_type) {
+                        const base_damage: f32 = switch (mob.entity_type) {
                             .zombie => 3.0,
                             .skeleton => 4.0,
                             .creeper => 0.0, // explodes instead (future)
                             else => 2.0,
                         };
+                        const damage = base_damage * self.world_rules.getMobDamageMultiplier();
                         if (damage > 0) {
                             const reduced = self.armor.getDamageReduction(damage);
                             self.player_stats.takeDamage(damage - reduced);
@@ -1145,6 +1175,8 @@ pub const Engine = struct {
 
                 if (target_bid == block.FURNACE) {
                     self.interactFurnace(hit.bx, hit.by, hit.bz);
+                } else if (target_bid == ENCHANTING_TABLE_BLOCK_ID) {
+                    self.interactEnchantingTable();
                 } else {
                     self.renderer.waitIdle();
                     self.placeBlock(hit.adjacent_x, hit.adjacent_y, hit.adjacent_z);
@@ -1381,6 +1413,38 @@ pub const Engine = struct {
             .state = furnace_mod.FurnaceState.init(),
         }) catch return null;
         return &self.active_furnaces.items[self.active_furnaces.items.len - 1].state;
+    }
+
+    /// Interact with an enchanting table: generate offers, auto-apply
+    /// the cheapest affordable enchantment.
+    fn interactEnchantingTable(self: *Engine) void {
+        const player_level = self.xp.getLevel();
+        var lapis_count: u8 = 0;
+        for (self.inventory.slots) |slot| {
+            if (slot.item == enchant_table_mod.LAPIS_ITEM_ID and slot.count > 0) {
+                lapis_count +|= slot.count;
+            }
+        }
+
+        // Seed from player position for deterministic offers per location
+        const seed: u64 = @bitCast(@as(i64, @intFromFloat(self.player_x * 1000.0)) +%
+            @as(i64, @intFromFloat(self.player_z * 1000.0)));
+        const offers = enchant_table_mod.generateOffers(seed, 0);
+
+        if (enchant_table_mod.findCheapestAffordable(&offers, player_level, lapis_count)) |idx| {
+            const offer = offers.offers[idx];
+            _ = self.xp.spendLevels(offer.xp_cost);
+            var lapis_to_remove: u8 = offer.lapis_cost;
+            for (&self.inventory.slots) |*slot| {
+                if (lapis_to_remove == 0) break;
+                if (slot.item == enchant_table_mod.LAPIS_ITEM_ID and slot.count > 0) {
+                    const take = @min(slot.count, lapis_to_remove);
+                    slot.count -= take;
+                    if (slot.count == 0) slot.item = 0;
+                    lapis_to_remove -= take;
+                }
+            }
+        }
     }
 
     /// Block hardness in seconds to mine with bare hand (mining speed 1.0).
@@ -1877,4 +1941,52 @@ test "spawner module" {
 
 test "taming module" {
     _ = taming_mod;
+}
+
+test "world_rules module" {
+    _ = world_rules_mod;
+}
+
+test "biome_features module" {
+    _ = biome_features_mod;
+}
+
+test "enchant_table module" {
+    _ = enchant_table_mod;
+}
+
+test "piston module" {
+    _ = piston_mod;
+}
+
+test "anvil module" {
+    _ = anvil_mod;
+}
+
+test "beacon module" {
+    _ = beacon_mod;
+}
+
+test "brewing_stand module" {
+    _ = brewing_stand_mod;
+}
+
+test "decorations module" {
+    _ = decorations_mod;
+}
+
+test "ender_items module" {
+    _ = ender_items_mod;
+}
+
+test "music module" {
+    _ = music_mod;
+}
+
+test "map_item module" {
+    _ = map_item_mod;
+}
+
+test "automation module" {
+    _ = automation_mod;
 }
