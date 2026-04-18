@@ -1,3 +1,22 @@
+// Import categories:
+//
+// Active in game loop: Window, Renderer, Camera, block, Chunk, ChunkColumn,
+//   mesh_greedy, terrain_gen, dimension_mod, nether_gen, chunk_loader_mod,
+//   raycast, inventory_mod, time_mod, mob_mod, entity_mod, health_mod,
+//   water_mod, persistence_mod, item_drop_mod, crafting_mod, furnace_mod,
+//   particles_mod, xp_mod, achievement_mod, armor_mod, weather_mod,
+//   movement_mod, gamemode_mod, breeding_mod, fishing_mod, command_mod,
+//   block_interact, scoreboard_mod, tools_mod, food_mod, hazards_mod,
+//   explosion_mod, projectiles_mod, spawner_mod, copper_mod, world_rules_mod,
+//   enchant_table_mod
+//
+// Test-only (imported for transitive test compilation): pipeline, mesh_indexed,
+//   mesh, noise, chunk_map, taming_mod, banners_mod, command_block_mod,
+//   crafting_stations_mod, storage_mod, cooking_mod, mob_variants_mod,
+//   advancements_mod, biome_features_mod, piston_mod, anvil_mod, beacon_mod,
+//   brewing_stand_mod, decorations_mod, ender_items_mod, music_mod,
+//   map_item_mod, automation_mod
+
 const std = @import("std");
 const vk = @import("vulkan");
 const zglfw = @import("zglfw");
