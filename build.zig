@@ -411,6 +411,20 @@ pub fn build(b: *std.Build) void {
     });
     const run_hud_data_tests = b.addRunArtifact(hud_data_tests);
 
+    // Transparent rendering pass tests
+    const transparent_pass_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/renderer/transparent_pass.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "block", .module = block_mod },
+                .{ .name = "chunk", .module = chunk_mod },
+            },
+        }),
+    });
+    const run_transparent_pass_tests = b.addRunArtifact(transparent_pass_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -446,4 +460,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_taming_tests.step);
     test_step.dependOn(&run_vehicles_tests.step);
     test_step.dependOn(&run_hud_data_tests.step);
+    test_step.dependOn(&run_transparent_pass_tests.step);
 }
