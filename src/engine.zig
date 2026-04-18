@@ -43,6 +43,8 @@ pub const block_interact = @import("world/block_interact.zig");
 pub const scoreboard_mod = @import("gameplay/scoreboard.zig");
 pub const tools_mod = @import("gameplay/tools.zig");
 pub const food_mod = @import("gameplay/food.zig");
+pub const hazards_mod = @import("gameplay/hazards.zig");
+pub const explosion_mod = @import("gameplay/explosion.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -149,6 +151,9 @@ pub const Engine = struct {
 
     // Scoreboard / stat tracking
     stat_tracker: scoreboard_mod.StatTracker,
+
+    // Active TNT fuses
+    active_tnt: std.ArrayList(explosion_mod.TNTState),
 
     // Mining progress (held left-click block breaking)
     mining_progress: f32 = 0.0,
@@ -310,6 +315,7 @@ pub const Engine = struct {
             .last_f_press = false,
             .last_t_press = false,
             .stat_tracker = scoreboard_mod.StatTracker.init(),
+            .active_tnt = .empty,
             .mining_progress = 0.0,
             .mining_target = null,
             .eating_progress = 0.0,
@@ -324,6 +330,7 @@ pub const Engine = struct {
         self.breeding.deinit(self.allocator);
         self.crafting_registry.deinit(self.allocator);
         self.active_furnaces.deinit(self.allocator);
+        self.active_tnt.deinit(self.allocator);
         self.renderer.deinit();
         self.window.deinit();
         self.chunks.deinit();
@@ -552,6 +559,25 @@ pub const Engine = struct {
                 self.player_stats.takeDamage(fall_damage - reduced);
                 self.stat_tracker.increment(.damage_taken, 1);
             }
+
+            // Contact damage from environmental hazards (lava, fire, cactus)
+            if (self.gamemode.takesBlockDamage()) {
+                const feet_block = self.getWorldBlock(
+                    @intFromFloat(@floor(self.player_x)),
+                    @intFromFloat(@floor(self.player_y)),
+                    @intFromFloat(@floor(self.player_z)),
+                );
+                if (feet_block) |bid| {
+                    const contact_dmg = hazards_mod.getContactDamage(bid);
+                    if (contact_dmg > 0) {
+                        self.player_stats.takeDamage(contact_dmg * dt);
+                        self.stat_tracker.increment(.damage_taken, 1);
+                    }
+                }
+            }
+
+            // Update active TNT fuses; explode when fuse expires
+            self.updateActiveTNT(dt);
 
             // Update health/hunger
             self.player_stats.update(dt);
@@ -847,6 +873,95 @@ pub const Engine = struct {
             return bid == block.WATER;
         }
     };
+
+    /// Block lookup wrapper for the explosion system.
+    const ExplosionBridge = struct {
+        var engine_ctx: ?*Engine = null;
+
+        fn getBlock(x: i32, y: i32, z: i32) u8 {
+            const eng = engine_ctx orelse return 0;
+            return eng.getWorldBlock(x, y, z) orelse 0;
+        }
+    };
+
+    /// Tick all active TNT fuses. When a fuse expires, run the explosion,
+    /// destroy blocks in the world, apply damage to the player, and re-mesh
+    /// affected chunks.
+    fn updateActiveTNT(self: *Engine, dt: f32) void {
+        ExplosionBridge.engine_ctx = self;
+        defer ExplosionBridge.engine_ctx = null;
+
+        var i: usize = 0;
+        while (i < self.active_tnt.items.len) {
+            if (self.active_tnt.items[i].update(dt)) {
+                const tnt = self.active_tnt.items[i];
+
+                // Compute explosion results
+                var result = explosion_mod.explode(
+                    tnt.x,
+                    tnt.y,
+                    tnt.z,
+                    explosion_mod.tnt_radius,
+                    explosion_mod.tnt_power,
+                    &ExplosionBridge.getBlock,
+                    &.{},
+                    self.allocator,
+                );
+                defer result.deinit(self.allocator);
+
+                // Destroy blocks in the world
+                self.renderer.waitIdle();
+                for (result.destroyed_blocks.items) |db| {
+                    _ = self.setWorldBlock(db.x, db.y, db.z, block.AIR);
+                }
+
+                // Batch re-mesh: collect unique chunk keys, then remesh each once
+                self.remeshExplosionArea(tnt.x, tnt.z, explosion_mod.tnt_radius);
+
+                // Apply blast damage to the player
+                if (self.gamemode.takesBlockDamage()) {
+                    const dx = self.player_x - tnt.x;
+                    const dy = self.player_y - tnt.y;
+                    const dz = self.player_z - tnt.z;
+                    const dist = @sqrt(dx * dx + dy * dy + dz * dz);
+                    if (dist < explosion_mod.tnt_radius) {
+                        const blast_dmg = explosion_mod.tnt_power * (1.0 - dist / explosion_mod.tnt_radius);
+                        const reduced = self.armor.getDamageReduction(blast_dmg);
+                        self.player_stats.takeDamage(blast_dmg - reduced);
+                        self.stat_tracker.increment(.damage_taken, 1);
+                    }
+                }
+
+                _ = self.active_tnt.swapRemove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// Re-mesh all chunks that overlap the explosion sphere.
+    /// Each chunk is re-meshed at most once regardless of how many blocks were destroyed.
+    fn remeshExplosionArea(self: *Engine, center_x: f32, center_z: f32, radius: f32) void {
+        const size: i32 = Chunk.SIZE;
+        const r_int: i32 = @intFromFloat(@ceil(radius));
+        const min_wx: i32 = @as(i32, @intFromFloat(@floor(center_x))) - r_int;
+        const max_wx: i32 = @as(i32, @intFromFloat(@floor(center_x))) + r_int;
+        const min_wz: i32 = @as(i32, @intFromFloat(@floor(center_z))) - r_int;
+        const max_wz: i32 = @as(i32, @intFromFloat(@floor(center_z))) + r_int;
+
+        const min_cx = @divFloor(min_wx, size);
+        const max_cx = @divFloor(max_wx, size);
+        const min_cz = @divFloor(min_wz, size);
+        const max_cz = @divFloor(max_wz, size);
+
+        var cz = min_cz;
+        while (cz <= max_cz) : (cz += 1) {
+            var cx = min_cx;
+            while (cx <= max_cx) : (cx += 1) {
+                self.remeshChunkByKey(cx, cz);
+            }
+        }
+    }
 
     fn handleBlockInteraction(self: *Engine, dt: f32) void {
         const left_pressed = self.window.handle.getMouseButton(.left) == .press;
@@ -1226,6 +1341,16 @@ pub const Engine = struct {
         // Read old block before replacing with air
         const old_block = self.getWorldBlock(wx, wy, wz) orelse return;
         if (!self.setWorldBlock(wx, wy, wz, block.AIR)) return;
+
+        // TNT activation: start a fuse instead of just dropping an item
+        if (old_block == block.TNT) {
+            const fx: f32 = @as(f32, @floatFromInt(wx)) + 0.5;
+            const fy: f32 = @as(f32, @floatFromInt(wy)) + 0.5;
+            const fz: f32 = @as(f32, @floatFromInt(wz)) + 0.5;
+            self.active_tnt.append(self.allocator, explosion_mod.TNTState.init(fx, fy, fz)) catch {};
+            self.remeshAffectedChunks(wx, wz);
+            return;
+        }
 
         // Scoreboard: track block mined
         self.stat_tracker.increment(.blocks_mined, 1);
@@ -1661,4 +1786,12 @@ test "tools module" {
 
 test "food module" {
     _ = food_mod;
+}
+
+test "hazards module" {
+    _ = hazards_mod;
+}
+
+test "explosion module" {
+    _ = explosion_mod;
 }
