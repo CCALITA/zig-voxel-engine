@@ -427,6 +427,82 @@ pub fn isTransparent(id: BlockId) bool {
     return get(id).transparent;
 }
 
+/// Block hardness in seconds to mine with bare hand (mining speed 1.0).
+/// Values follow vanilla Minecraft conventions.
+pub fn getBlockHardness(block_id: BlockId) f32 {
+    return switch (block_id) {
+        DIRT, GRASS, SAND, GRAVEL, CLAY => 0.75,
+        STONE, COBBLESTONE, MOSSY_COBBLESTONE => 1.5,
+        OAK_LOG, OAK_PLANKS, BOOKSHELF, CHEST => 2.0,
+        OAK_LEAVES => 0.2,
+        COAL_ORE, IRON_ORE, GOLD_ORE, DIAMOND_ORE, REDSTONE_ORE => 3.0,
+        OBSIDIAN => 50.0,
+        BRICK => 2.0,
+        SNOW, ICE => 0.5,
+        CACTUS => 0.4,
+        PUMPKIN, MELON => 1.0,
+        GLOWSTONE => 0.3,
+        NETHERRACK => 0.4,
+        SOUL_SAND => 0.5,
+        GLASS => 0.3,
+        TNT => 0.0, // instant
+        FURNACE => 3.5,
+        BEDROCK => 999.0, // effectively unbreakable
+        COPPER_BLOCK, EXPOSED_COPPER, WEATHERED_COPPER, OXIDIZED_COPPER => 3.0,
+        else => 1.0, // default for unlisted blocks
+    };
+}
+
+/// Approximate block colors matching the terrain.frag palette.
+/// Maps a block ID to an RGB color for particle effects.
+pub fn getBlockColor(block_id: BlockId) [3]f32 {
+    return switch (block_id) {
+        STONE => .{ 0.50, 0.50, 0.50 },
+        DIRT => .{ 0.55, 0.35, 0.20 },
+        GRASS => .{ 0.30, 0.65, 0.15 },
+        COBBLESTONE => .{ 0.40, 0.40, 0.40 },
+        OAK_PLANKS => .{ 0.70, 0.55, 0.30 },
+        SAND => .{ 0.85, 0.80, 0.55 },
+        GRAVEL => .{ 0.55, 0.50, 0.45 },
+        OAK_LOG => .{ 0.40, 0.30, 0.15 },
+        OAK_LEAVES => .{ 0.20, 0.50, 0.10 },
+        WATER => .{ 0.20, 0.35, 0.80 },
+        BEDROCK => .{ 0.25, 0.25, 0.25 },
+        COAL_ORE => .{ 0.35, 0.35, 0.35 },
+        IRON_ORE => .{ 0.55, 0.50, 0.45 },
+        GOLD_ORE => .{ 0.65, 0.60, 0.30 },
+        DIAMOND_ORE => .{ 0.40, 0.65, 0.65 },
+        REDSTONE_ORE => .{ 0.55, 0.25, 0.20 },
+        GLASS => .{ 0.75, 0.85, 0.90 },
+        BRICK => .{ 0.60, 0.30, 0.25 },
+        OBSIDIAN => .{ 0.10, 0.05, 0.15 },
+        TNT => .{ 0.75, 0.30, 0.25 },
+        BOOKSHELF => .{ 0.50, 0.35, 0.20 },
+        MOSSY_COBBLESTONE => .{ 0.35, 0.45, 0.30 },
+        ICE => .{ 0.65, 0.80, 0.95 },
+        SNOW => .{ 0.90, 0.92, 0.95 },
+        CLAY => .{ 0.65, 0.62, 0.58 },
+        CACTUS => .{ 0.20, 0.55, 0.15 },
+        PUMPKIN => .{ 0.80, 0.50, 0.10 },
+        MELON => .{ 0.40, 0.60, 0.20 },
+        GLOWSTONE => .{ 0.85, 0.75, 0.40 },
+        NETHERRACK => .{ 0.45, 0.20, 0.20 },
+        SOUL_SAND => .{ 0.35, 0.28, 0.22 },
+        LAVA => .{ 0.90, 0.40, 0.10 },
+        FURNACE => .{ 0.50, 0.50, 0.50 },
+        DOOR => .{ 0.55, 0.40, 0.25 },
+        BED => .{ 0.60, 0.20, 0.20 },
+        LADDER => .{ 0.55, 0.40, 0.25 },
+        CHEST => .{ 0.55, 0.40, 0.20 },
+        TRAPDOOR => .{ 0.50, 0.38, 0.22 },
+        COPPER_BLOCK => .{ 0.73, 0.45, 0.30 },
+        EXPOSED_COPPER => .{ 0.60, 0.50, 0.40 },
+        WEATHERED_COPPER => .{ 0.45, 0.55, 0.45 },
+        OXIDIZED_COPPER => .{ 0.35, 0.60, 0.55 },
+        else => .{ 0.50, 0.50, 0.50 },
+    };
+}
+
 const std = @import("std");
 
 test "air is not solid" {

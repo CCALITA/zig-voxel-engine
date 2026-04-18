@@ -1290,7 +1290,7 @@ pub const Engine = struct {
 
                 const target_bid = self.getWorldBlock(hit.bx, hit.by, hit.bz) orelse block.AIR;
                 const mining_speed = self.getHeldToolMiningSpeed(target_bid);
-                const hardness = getBlockHardness(target_bid);
+                const hardness = block.getBlockHardness(target_bid);
 
                 if (hardness > 0) {
                     self.mining_progress += dt * mining_speed / hardness;
@@ -1644,32 +1644,6 @@ pub const Engine = struct {
         }
     }
 
-    /// Block hardness in seconds to mine with bare hand (mining speed 1.0).
-    /// Values follow vanilla Minecraft conventions.
-    fn getBlockHardness(block_id: block.BlockId) f32 {
-        return switch (block_id) {
-            block.DIRT, block.GRASS, block.SAND, block.GRAVEL, block.CLAY => 0.75,
-            block.STONE, block.COBBLESTONE, block.MOSSY_COBBLESTONE => 1.5,
-            block.OAK_LOG, block.OAK_PLANKS, block.BOOKSHELF, block.CHEST => 2.0,
-            block.OAK_LEAVES => 0.2,
-            block.COAL_ORE, block.IRON_ORE, block.GOLD_ORE, block.DIAMOND_ORE, block.REDSTONE_ORE => 3.0,
-            block.OBSIDIAN => 50.0,
-            block.BRICK => 2.0,
-            block.SNOW, block.ICE => 0.5,
-            block.CACTUS => 0.4,
-            block.PUMPKIN, block.MELON => 1.0,
-            block.GLOWSTONE => 0.3,
-            block.NETHERRACK => 0.4,
-            block.SOUL_SAND => 0.5,
-            block.GLASS => 0.3,
-            block.TNT => 0.0, // instant
-            block.FURNACE => 3.5,
-            block.BEDROCK => 999.0, // effectively unbreakable
-            block.COPPER_BLOCK, block.EXPOSED_COPPER, block.WEATHERED_COPPER, block.OXIDIZED_COPPER => 3.0,
-            else => 1.0, // default for unlisted blocks
-        };
-    }
-
     fn breakBlock(self: *Engine, wx: i32, wy: i32, wz: i32) void {
         // Read old block before replacing with air
         const old_block = self.getWorldBlock(wx, wy, wz) orelse return;
@@ -1709,7 +1683,7 @@ pub const Engine = struct {
             const fz: f32 = @as(f32, @floatFromInt(wz)) + 0.5;
 
             // Emit break particles with the block's color
-            const color = getBlockColor(old_block);
+            const color = block.getBlockColor(old_block);
             self.particle_manager.emitBlockBreak(fx, fy, fz, color[0], color[1], color[2]);
 
             const loot = loot_mod.getBlockLoot(old_block);
@@ -1922,56 +1896,6 @@ fn meshColumnSections(
         const section_y: i32 = @as(i32, @intCast(si)) * @as(i32, Chunk.SIZE);
         try renderer.uploadChunk(mesh_data.vertices, mesh_data.indices, world_x, section_y, world_z);
     }
-}
-
-/// Approximate block colors matching the terrain.frag palette.
-/// Maps a block ID to an RGB color for particle effects.
-fn getBlockColor(block_id: block.BlockId) [3]f32 {
-    return switch (block_id) {
-        block.STONE => .{ 0.50, 0.50, 0.50 },
-        block.DIRT => .{ 0.55, 0.35, 0.20 },
-        block.GRASS => .{ 0.30, 0.65, 0.15 },
-        block.COBBLESTONE => .{ 0.40, 0.40, 0.40 },
-        block.OAK_PLANKS => .{ 0.70, 0.55, 0.30 },
-        block.SAND => .{ 0.85, 0.80, 0.55 },
-        block.GRAVEL => .{ 0.55, 0.50, 0.45 },
-        block.OAK_LOG => .{ 0.40, 0.30, 0.15 },
-        block.OAK_LEAVES => .{ 0.20, 0.50, 0.10 },
-        block.WATER => .{ 0.20, 0.35, 0.80 },
-        block.BEDROCK => .{ 0.25, 0.25, 0.25 },
-        block.COAL_ORE => .{ 0.35, 0.35, 0.35 },
-        block.IRON_ORE => .{ 0.55, 0.50, 0.45 },
-        block.GOLD_ORE => .{ 0.65, 0.60, 0.30 },
-        block.DIAMOND_ORE => .{ 0.40, 0.65, 0.65 },
-        block.REDSTONE_ORE => .{ 0.55, 0.25, 0.20 },
-        block.GLASS => .{ 0.75, 0.85, 0.90 },
-        block.BRICK => .{ 0.60, 0.30, 0.25 },
-        block.OBSIDIAN => .{ 0.10, 0.05, 0.15 },
-        block.TNT => .{ 0.75, 0.30, 0.25 },
-        block.BOOKSHELF => .{ 0.50, 0.35, 0.20 },
-        block.MOSSY_COBBLESTONE => .{ 0.35, 0.45, 0.30 },
-        block.ICE => .{ 0.65, 0.80, 0.95 },
-        block.SNOW => .{ 0.90, 0.92, 0.95 },
-        block.CLAY => .{ 0.65, 0.62, 0.58 },
-        block.CACTUS => .{ 0.20, 0.55, 0.15 },
-        block.PUMPKIN => .{ 0.80, 0.50, 0.10 },
-        block.MELON => .{ 0.40, 0.60, 0.20 },
-        block.GLOWSTONE => .{ 0.85, 0.75, 0.40 },
-        block.NETHERRACK => .{ 0.45, 0.20, 0.20 },
-        block.SOUL_SAND => .{ 0.35, 0.28, 0.22 },
-        block.LAVA => .{ 0.90, 0.40, 0.10 },
-        block.FURNACE => .{ 0.50, 0.50, 0.50 },
-        block.DOOR => .{ 0.55, 0.40, 0.25 },
-        block.BED => .{ 0.60, 0.20, 0.20 },
-        block.LADDER => .{ 0.55, 0.40, 0.25 },
-        block.CHEST => .{ 0.55, 0.40, 0.20 },
-        block.TRAPDOOR => .{ 0.50, 0.38, 0.22 },
-        block.COPPER_BLOCK => .{ 0.73, 0.45, 0.30 },
-        block.EXPOSED_COPPER => .{ 0.60, 0.50, 0.40 },
-        block.WEATHERED_COPPER => .{ 0.45, 0.55, 0.45 },
-        block.OXIDIZED_COPPER => .{ 0.35, 0.60, 0.55 },
-        else => .{ 0.50, 0.50, 0.50 },
-    };
 }
 
 /// Convert a yaw angle (radians) to a cardinal direction string.
