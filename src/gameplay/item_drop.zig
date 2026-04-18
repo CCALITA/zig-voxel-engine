@@ -167,6 +167,8 @@ test "update applies gravity so y decreases" {
     defer mgr.deinit();
 
     try mgr.spawnDrop(0.0, 100.0, 0.0, 1, 1);
+    // Zero out the initial upward pop so gravity is the only force.
+    mgr.drops.items[0].vy = 0.0;
     const initial_y = mgr.drops.items[0].y;
 
     const picked = try mgr.update(0.1, 999.0, 999.0, 999.0);

@@ -201,7 +201,6 @@ pub const Engine = struct {
 
     // Projectile system (arrows, thrown items)
     projectile_manager: projectiles_mod.ProjectileManager,
-    skeleton_shoot_timer: f32,
 
     // World rules (difficulty, spawn, border)
     world_rules: world_rules_mod.WorldRules,
@@ -381,7 +380,6 @@ pub const Engine = struct {
             .stat_tracker = scoreboard_mod.StatTracker.init(),
             .active_tnt = .empty,
             .projectile_manager = projectiles_mod.ProjectileManager.init(),
-            .skeleton_shoot_timer = 0.0,
             .world_rules = world_rules_mod.WorldRules.init(),
             .mining_progress = 0.0,
             .mining_target = null,
@@ -429,10 +427,13 @@ pub const Engine = struct {
             var forward_input: f32 = 0;
             var right_input: f32 = 0;
 
-            if (self.window.handle.getKey(.w) == .press) forward_input += 1;
-            if (self.window.handle.getKey(.s) == .press) forward_input -= 1;
-            if (self.window.handle.getKey(.d) == .press) right_input += 1;
-            if (self.window.handle.getKey(.a) == .press) right_input -= 1;
+            // Skip movement when chat is open so typing doesn't move the player
+            if (!self.chat_open) {
+                if (self.window.handle.getKey(.w) == .press) forward_input += 1;
+                if (self.window.handle.getKey(.s) == .press) forward_input -= 1;
+                if (self.window.handle.getKey(.d) == .press) right_input += 1;
+                if (self.window.handle.getKey(.a) == .press) right_input -= 1;
+            }
 
             // Death screen: press R to respawn, skip gameplay updates
             if (self.player_stats.is_dead) {
@@ -528,7 +529,11 @@ pub const Engine = struct {
             }
 
             if (self.window.handle.getKey(.escape) == .press) {
-                self.window.handle.setShouldClose(true);
+                if (self.chat_open) {
+                    self.chat_open = false;
+                } else {
+                    self.window.handle.setShouldClose(true);
+                }
             }
 
             // Hotbar selection (number keys 1-9)
@@ -698,15 +703,16 @@ pub const Engine = struct {
 
             // Hostile mob melee attacks on the player
             if (self.gamemode.takesBlockDamage()) {
-                self.skeleton_shoot_timer += dt;
                 for (self.mob_manager.entities.items) |*mob| {
                     if (!mob.alive) continue;
                     if (!mob.entity_type.isHostile()) continue;
                     const dist = mob.distanceToPoint(self.player_x, self.player_y, self.player_z);
 
-                    // Skeleton ranged attack: shoot arrow every 2 seconds
+                    // Skeleton ranged attack: shoot arrow every 2 seconds (per-mob timer)
                     if (mob.entity_type == .skeleton and dist < 16.0 and dist > 3.0) {
-                        if (self.skeleton_shoot_timer >= 2.0) {
+                        mob.shoot_timer += dt;
+                        if (mob.shoot_timer >= 2.0) {
+                            mob.shoot_timer = 0.0;
                             const sdx = self.player_x - mob.x;
                             const sdy = (self.player_y + PLAYER_EYE_HEIGHT) - (mob.y + 1.5);
                             const sdz = self.player_z - mob.z;
@@ -736,10 +742,6 @@ pub const Engine = struct {
                             self.player_stats.takeDamage(damage - reduced);
                         }
                     }
-                }
-                // Reset shoot timer after processing all skeletons
-                if (self.skeleton_shoot_timer >= 2.0) {
-                    self.skeleton_shoot_timer = 0.0;
                 }
             }
 

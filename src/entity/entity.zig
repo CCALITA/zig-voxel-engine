@@ -36,6 +36,9 @@ pub const Entity = struct {
     alive: bool,
     on_ground: bool,
 
+    /// Per-entity cooldown timer (e.g. skeleton shoot interval).
+    shoot_timer: f32 = 0.0,
+
     /// Create a new entity with type-appropriate stats at the given position.
     pub fn init(entity_type: EntityType, x: f32, y: f32, z: f32) Entity {
         const stats = getTypeStats(entity_type);

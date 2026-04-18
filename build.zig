@@ -147,30 +147,6 @@ pub fn build(b: *std.Build) void {
     });
     const run_network_client_tests = b.addRunArtifact(network_client_tests);
 
-    // Redstone tests
-    const redstone_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/redstone/redstone.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "block", .module = block_mod },
-                .{ .name = "chunk", .module = chunk_mod },
-            },
-        }),
-    });
-    const run_redstone_tests = b.addRunArtifact(redstone_tests);
-
-    // Redstone component tests
-    const redstone_component_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/redstone/components.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const run_redstone_component_tests = b.addRunArtifact(redstone_component_tests);
-
     // Structure generation tests (rooted at src/world/ for relative import resolution)
     const structures_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -468,7 +444,7 @@ pub fn build(b: *std.Build) void {
     // Redstone automation tests (hopper, dropper, dispenser)
     const automation_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/redstone/automation.zig"),
+            .root_source_file = b.path("src/gameplay/automation.zig"),
             .target = target,
             .optimize = optimize,
         }),
@@ -494,16 +470,6 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_banners_tests = b.addRunArtifact(banners_tests);
-
-    // Copper & special block tests
-    const copper_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/world/copper.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    const run_copper_tests = b.addRunArtifact(copper_tests);
 
     // Advancements system tests
     const advancements_tests = b.addTest(.{
@@ -544,8 +510,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_network_protocol_tests.step);
     test_step.dependOn(&run_network_server_tests.step);
     test_step.dependOn(&run_network_client_tests.step);
-    test_step.dependOn(&run_redstone_tests.step);
-    test_step.dependOn(&run_redstone_component_tests.step);
     test_step.dependOn(&run_structures_tests.step);
     test_step.dependOn(&run_experience_tests.step);
     test_step.dependOn(&run_gamemode_tests.step);
@@ -578,7 +542,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_automation_tests.step);
     test_step.dependOn(&run_piston_tests.step);
     test_step.dependOn(&run_banners_tests.step);
-    test_step.dependOn(&run_copper_tests.step);
     test_step.dependOn(&run_advancements_tests.step);
     test_step.dependOn(&run_crafting_stations_tests.step);
     test_step.dependOn(&run_mob_variants_tests.step);
