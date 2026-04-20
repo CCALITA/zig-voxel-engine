@@ -244,11 +244,11 @@ pub const Engine = struct {
     // Inventory screen (E key)
     inventory_open: bool = false,
     last_e_press: bool = false,
-    // Hand swing animation timer
     hand_swing_timer: f32 = 0.0,
-    // Cursor item for inventory drag
     cursor_item: inventory_mod.Slot = inventory_mod.Slot.empty,
     last_inv_click: bool = false,
+    // 2x2 crafting grid (player inventory crafting)
+    craft_grid: [4]inventory_mod.Slot = [_]inventory_mod.Slot{inventory_mod.Slot.empty} ** 4,
 
     const FurnaceEntry = struct {
         x: i32,
@@ -961,17 +961,18 @@ pub const Engine = struct {
                 }
             }
 
-            // Submit item drops as small cubes on the ground
+            // Submit item drops as small colored cubes on the ground
             for (self.drop_manager.drops.items) |drop| {
                 if (drop.active) {
+                    const dc = block.getBlockColor(@intCast(@min(drop.item_id, 119)));
                     self.renderer.submitParticleDraw(.{
                         .x = drop.x,
                         .y = drop.y,
                         .z = drop.z,
-                        .r = 1.0,
-                        .g = 1.0,
-                        .b = 1.0,
-                        .size = 0.3,
+                        .r = dc[0],
+                        .g = dc[1],
+                        .b = dc[2],
+                        .size = 0.35,
                     });
                 }
             }
@@ -1284,38 +1285,67 @@ pub const Engine = struct {
             count = addQuad(&verts, count, cx - 50, cy + 20, 100, 4, 0.8, 0.8, 0.8, 0.7);
         }
 
-        // === FIRST-PERSON HAND (bottom-right) ===
+        // === FIRST-PERSON HAND (bottom-right) with swing animation ===
         if (!self.inventory_open) {
-            const hand_x = sw - 90.0;
-            const hand_y = sh - 130.0;
+            // Update swing timer
+            const left_click = self.window.handle.getMouseButton(.left) == .press;
+            if (left_click and self.hand_swing_timer <= 0) {
+                self.hand_swing_timer = 0.3; // 0.3s swing duration
+            }
+            if (self.hand_swing_timer > 0) {
+                self.hand_swing_timer -= @as(f32, @floatCast(zglfw.getTime() - self.last_time + 0.001));
+                if (self.hand_swing_timer < 0) self.hand_swing_timer = 0;
+            }
+
+            // Swing offset: arc from rest → up-left → back to rest
+            const swing_t = if (self.hand_swing_timer > 0)
+                (0.3 - self.hand_swing_timer) / 0.3
+            else
+                @as(f32, 0);
+            const swing_phase = @sin(swing_t * std.math.pi);
+            const swing_dx = -swing_phase * 40.0; // swing left
+            const swing_dy = -swing_phase * 50.0; // swing up
+
+            const base_x = sw - 100.0;
+            const base_y = sh - 140.0;
+            const hand_x = base_x + swing_dx;
+            const hand_y = base_y + swing_dy;
             const held_slot = self.inventory.getSlot(self.selected_slot);
 
-            // Arm (skin-colored rectangle)
-            count = addQuad(&verts, count, hand_x + 15, hand_y + 40, 30, 80, 0.76, 0.57, 0.43, 1.0);
-            // Arm shadow
-            count = addQuad(&verts, count, hand_x + 15, hand_y + 40, 30, 80, 0.0, 0.0, 0.0, 0.15);
+            // Arm (skin-colored, slightly angled during swing)
+            count = addQuad(&verts, count, hand_x + 18, hand_y + 45, 34, 90, 0.76, 0.57, 0.43, 1.0);
+            // Arm shadow (right edge)
+            count = addQuad(&verts, count, hand_x + 48, hand_y + 45, 4, 90, 0.60, 0.42, 0.30, 0.8);
             // Arm highlight (left edge)
-            count = addQuad(&verts, count, hand_x + 15, hand_y + 40, 4, 80, 0.85, 0.67, 0.53, 0.9);
+            count = addQuad(&verts, count, hand_x + 18, hand_y + 45, 4, 90, 0.88, 0.70, 0.56, 0.7);
+            // Wrist band
+            count = addQuad(&verts, count, hand_x + 18, hand_y + 42, 34, 4, 0.65, 0.45, 0.30, 0.9);
 
             if (!held_slot.isEmpty()) {
-                // Held block: 3D-ish cube face on top of arm
                 const bc = block.getBlockColor(@intCast(@min(held_slot.item, 119)));
-                // Top face (lighter)
-                count = addQuad(&verts, count, hand_x, hand_y, 50, 20, bc[0] * 1.2, bc[1] * 1.2, bc[2] * 1.2, 1.0);
+                // Top face (lighter — isometric look)
+                count = addQuad(&verts, count, hand_x, hand_y, 55, 22, @min(bc[0] * 1.3, 1.0), @min(bc[1] * 1.3, 1.0), @min(bc[2] * 1.3, 1.0), 1.0);
                 // Front face
-                count = addQuad(&verts, count, hand_x, hand_y + 20, 50, 30, bc[0], bc[1], bc[2], 1.0);
-                // Side face (darker)
-                count = addQuad(&verts, count, hand_x + 50, hand_y + 5, 15, 45, bc[0] * 0.7, bc[1] * 0.7, bc[2] * 0.7, 1.0);
-                // Block outline
-                count = addQuad(&verts, count, hand_x - 1, hand_y - 1, 67, 1, 0, 0, 0, 0.4);
-                count = addQuad(&verts, count, hand_x - 1, hand_y + 50, 67, 1, 0, 0, 0, 0.4);
+                count = addQuad(&verts, count, hand_x, hand_y + 22, 55, 28, bc[0], bc[1], bc[2], 1.0);
+                // Right face (darker)
+                count = addQuad(&verts, count, hand_x + 55, hand_y + 6, 16, 44, bc[0] * 0.65, bc[1] * 0.65, bc[2] * 0.65, 1.0);
+                // Top-right edge highlight
+                count = addQuad(&verts, count, hand_x, hand_y - 1, 72, 1, 0, 0, 0, 0.35);
+                count = addQuad(&verts, count, hand_x - 1, hand_y, 1, 50, 0, 0, 0, 0.25);
             } else {
-                // Empty hand (fist shape)
-                count = addQuad(&verts, count, hand_x + 12, hand_y + 20, 36, 25, 0.80, 0.60, 0.45, 1.0);
-                // Fingers
-                count = addQuad(&verts, count, hand_x + 12, hand_y + 10, 9, 15, 0.78, 0.58, 0.42, 1.0);
-                count = addQuad(&verts, count, hand_x + 23, hand_y + 8, 9, 17, 0.78, 0.58, 0.42, 1.0);
-                count = addQuad(&verts, count, hand_x + 34, hand_y + 10, 9, 15, 0.78, 0.58, 0.42, 1.0);
+                // Empty hand — fist with fingers
+                count = addQuad(&verts, count, hand_x + 14, hand_y + 22, 42, 28, 0.82, 0.62, 0.47, 1.0);
+                // Thumb
+                count = addQuad(&verts, count, hand_x + 10, hand_y + 28, 8, 18, 0.80, 0.60, 0.44, 1.0);
+                // Fingers (4 knuckles)
+                count = addQuad(&verts, count, hand_x + 14, hand_y + 10, 10, 16, 0.78, 0.58, 0.42, 1.0);
+                count = addQuad(&verts, count, hand_x + 25, hand_y + 8, 10, 18, 0.78, 0.58, 0.42, 1.0);
+                count = addQuad(&verts, count, hand_x + 36, hand_y + 10, 10, 16, 0.78, 0.58, 0.42, 1.0);
+                count = addQuad(&verts, count, hand_x + 47, hand_y + 14, 9, 12, 0.76, 0.56, 0.40, 1.0);
+                // Finger gaps (dark lines between knuckles)
+                count = addQuad(&verts, count, hand_x + 24, hand_y + 10, 1, 14, 0.55, 0.38, 0.25, 0.6);
+                count = addQuad(&verts, count, hand_x + 35, hand_y + 10, 1, 14, 0.55, 0.38, 0.25, 0.6);
+                count = addQuad(&verts, count, hand_x + 46, hand_y + 14, 1, 10, 0.55, 0.38, 0.25, 0.6);
             }
         }
 
@@ -1351,11 +1381,22 @@ pub const Engine = struct {
                     const gy = craft_y + @as(f32, @floatFromInt(cy_i)) * (slot_s + slot_pad);
                     count = addQuad(&verts, count, gx, gy, slot_s, slot_s, 0.30, 0.30, 0.30, 1.0);
                     count = addQuad(&verts, count, gx + 2, gy + 2, slot_s - 4, slot_s - 4, 0.42, 0.42, 0.42, 0.9);
+                    // Render item in crafting slot
+                    const ci = cy_i * 2 + cx_i;
+                    if (!self.craft_grid[ci].isEmpty()) {
+                        const cc = block.getBlockColor(@intCast(@min(self.craft_grid[ci].item, 119)));
+                        count = addQuad(&verts, count, gx + 5, gy + 5, slot_s - 10, slot_s - 10, cc[0], cc[1], cc[2], 1.0);
+                    }
                 }
             }
-            // Crafting output
+            // Crafting output slot
+            const craft_result = self.getCraftResult();
             count = addQuad(&verts, count, craft_x + 100, craft_y + 18, slot_s + 6, slot_s + 6, 0.25, 0.25, 0.25, 1.0);
             count = addQuad(&verts, count, craft_x + 103, craft_y + 21, slot_s, slot_s, 0.45, 0.45, 0.45, 0.9);
+            if (craft_result) |res| {
+                const rc = block.getBlockColor(@intCast(@min(res.result_item, 119)));
+                count = addQuad(&verts, count, craft_x + 108, craft_y + 26, slot_s - 10, slot_s - 10, rc[0], rc[1], rc[2], 1.0);
+            }
             // Arrow
             count = addQuad(&verts, count, craft_x + 88, craft_y + 30, 10, 4, 0.8, 0.8, 0.8, 0.5);
 
@@ -1472,6 +1513,30 @@ pub const Engine = struct {
         const grid_x = inv_x + 12;
         const grid_y = inv_y + 200;
 
+        // Check crafting grid (2x2) clicks
+        const craft_x = inv_x + inv_w - 120;
+        const craft_y = inv_y + 44;
+        var cri: u32 = 0;
+        while (cri < 2) : (cri += 1) {
+            var cci: u32 = 0;
+            while (cci < 2) : (cci += 1) {
+                const gx = craft_x + @as(f32, @floatFromInt(cci)) * (slot_s + slot_pad);
+                const gy = craft_y + @as(f32, @floatFromInt(cri)) * (slot_s + slot_pad);
+                if (mx >= gx and mx < gx + slot_s and my >= gy and my < gy + slot_s) {
+                    self.swapCursorWithCraftSlot(@intCast(cri * 2 + cci));
+                    return;
+                }
+            }
+        }
+
+        // Check crafting output slot click
+        const out_x = craft_x + 100;
+        const out_y = craft_y + 18;
+        if (mx >= out_x and mx < out_x + slot_s + 6 and my >= out_y and my < out_y + slot_s + 6) {
+            self.tryCraft();
+            return;
+        }
+
         // Check main inventory grid (3x9)
         var row: u32 = 0;
         while (row < 3) : (row += 1) {
@@ -1504,6 +1569,44 @@ pub const Engine = struct {
         const slot_val = self.inventory.getSlot(slot_idx);
         self.inventory.slots[slot_idx] = self.cursor_item;
         self.cursor_item = slot_val;
+    }
+
+    fn swapCursorWithCraftSlot(self: *Engine, craft_idx: u8) void {
+        if (craft_idx >= 4) return;
+        const slot_val = self.craft_grid[craft_idx];
+        self.craft_grid[craft_idx] = self.cursor_item;
+        self.cursor_item = slot_val;
+    }
+
+    fn getCraftResult(self: *const Engine) ?crafting_mod.Recipe {
+        // Build a 3x3 grid from the 2x2 crafting slots (placed in top-left)
+        const grid: [3][3]crafting_mod.ItemId = .{
+            .{ self.craft_grid[0].item, self.craft_grid[1].item, 0 },
+            .{ self.craft_grid[2].item, self.craft_grid[3].item, 0 },
+            .{ 0, 0, 0 },
+        };
+        return self.crafting_registry.findMatch(grid);
+    }
+
+    fn tryCraft(self: *Engine) void {
+        const result = self.getCraftResult() orelse return;
+        // Consume 1 from each crafting slot that has an item
+        for (&self.craft_grid) |*slot| {
+            if (!slot.isEmpty()) {
+                slot.count -= 1;
+                if (slot.count == 0) slot.* = inventory_mod.Slot.empty;
+            }
+        }
+        // Give result to cursor or add to inventory
+        if (self.cursor_item.isEmpty()) {
+            self.cursor_item = .{ .item = result.result_item, .count = result.result_count };
+        } else if (self.cursor_item.item == result.result_item and
+            self.cursor_item.count + result.result_count <= 64)
+        {
+            self.cursor_item.count += result.result_count;
+        } else {
+            _ = self.inventory.addItem(result.result_item, result.result_count);
+        }
     }
 
     fn addQuad(verts: []ui_pipeline_mod.UiVertex, start: u32, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) u32 {
