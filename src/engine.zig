@@ -1052,6 +1052,14 @@ pub const Engine = struct {
     }
 
     fn switchDimension(self: *Engine) void {
+        std.debug.print("[Dimension] Switching from {s}...\n", .{
+            @as([]const u8, switch (self.current_dimension) {
+                .overworld => "Overworld",
+                .nether => "Nether",
+                .the_end => "End",
+            }),
+        });
+
         if (self.current_dimension == .overworld) {
             self.overworld_player_pos = .{
                 .x = self.player_x,
@@ -1059,10 +1067,9 @@ pub const Engine = struct {
                 .z = self.player_z,
             };
             self.current_dimension = .nether;
-            // Nether coords = overworld / 8
             self.player_x /= 8.0;
             self.player_z /= 8.0;
-            self.player_y = 70.0; // spawn height in nether
+            self.player_y = 70.0;
         } else {
             self.current_dimension = .overworld;
             if (self.overworld_player_pos) |pos| {
@@ -1074,12 +1081,24 @@ pub const Engine = struct {
         self.player_vy = 0.0;
         self.on_ground = false;
 
-        // Unload all chunks and reload for new dimension
+        // Clear all rendered chunks (GPU resources)
         self.renderer.clearChunks();
-        self.chunks.clearAndFree();
-        self.chunk_loader.deinit();
-        self.chunk_loader = chunk_loader_mod.ChunkLoader.init(self.allocator, RENDER_RADIUS);
-        // Chunks will load via dynamic loader next frame
+
+        // Clear the chunk HashMap
+        var it = self.chunks.iterator();
+        while (it.next()) |_| {}
+        self.chunks.clearRetainingCapacity();
+
+        // Reset chunk loader's loaded set (don't deinit — just clear)
+        self.chunk_loader.loaded.clearRetainingCapacity();
+
+        std.debug.print("[Dimension] Now in {s}. Chunks will load next frame.\n", .{
+            @as([]const u8, switch (self.current_dimension) {
+                .overworld => "Overworld",
+                .nether => "Nether",
+                .the_end => "End",
+            }),
+        });
     }
 
     /// Update camera, day/night cycle, chunk loading, and draw a frame.
@@ -1124,68 +1143,110 @@ pub const Engine = struct {
 
     fn generateAndUploadUi(self: *Engine) void {
         const V = ui_pipeline_mod.UiVertex;
-        var verts: [512]V = undefined;
+        var verts: [1024]V = undefined;
         var count: u32 = 0;
 
-        // Use actual screen dimensions from renderer
         const sw: f32 = @floatFromInt(self.renderer.swapchain_extent.width);
         const sh: f32 = @floatFromInt(self.renderer.swapchain_extent.height);
         const cx = sw / 2.0;
         const cy = sh / 2.0;
 
-        // --- Crosshair (white +) ---
-        const ch_len: f32 = 12.0;
-        const ch_thick: f32 = 2.0;
-        count = addQuad(&verts, count, cx - ch_len, cy - ch_thick / 2, ch_len * 2, ch_thick, 1, 1, 1, 1);
-        count = addQuad(&verts, count, cx - ch_thick / 2, cy - ch_len, ch_thick, ch_len * 2, 1, 1, 1, 1);
+        // === CROSSHAIR (thin white cross with dark outline) ===
+        const ch_len: f32 = 10.0;
+        const ch_thick: f32 = 1.5;
+        // Dark outline
+        count = addQuad(&verts, count, cx - ch_len - 1, cy - ch_thick - 1, ch_len * 2 + 2, ch_thick * 2 + 2, 0, 0, 0, 0.5);
+        count = addQuad(&verts, count, cx - ch_thick - 1, cy - ch_len - 1, ch_thick * 2 + 2, ch_len * 2 + 2, 0, 0, 0, 0.5);
+        // White center
+        count = addQuad(&verts, count, cx - ch_len, cy - ch_thick / 2, ch_len * 2, ch_thick, 1, 1, 1, 0.9);
+        count = addQuad(&verts, count, cx - ch_thick / 2, cy - ch_len, ch_thick, ch_len * 2, 1, 1, 1, 0.9);
 
-        // --- Health bar (bottom-left) ---
-        const hbar_x: f32 = 20.0;
-        const hbar_y: f32 = sh - 40.0;
-        const hbar_w: f32 = 200.0;
-        const hbar_h: f32 = 14.0;
-        const hp_frac = self.renderer.hud_health;
-        count = addQuad(&verts, count, hbar_x, hbar_y, hbar_w, hbar_h, 0.2, 0.05, 0.05, 0.8);
-        count = addQuad(&verts, count, hbar_x, hbar_y, hbar_w * hp_frac, hbar_h, 0.85, 0.1, 0.1, 1.0);
+        // === HEALTH (individual heart squares, bottom-left) ===
+        const hearts_y: f32 = sh - 52.0;
+        const hearts_x: f32 = sw / 2.0 - 100.0;
+        const heart_size: f32 = 9.0;
+        const heart_gap: f32 = 2.0;
+        const total_hearts: u32 = 10;
+        const filled_hearts: u32 = self.player_stats.getHealthHearts();
+        var hi: u32 = 0;
+        while (hi < total_hearts) : (hi += 1) {
+            const hx = hearts_x + @as(f32, @floatFromInt(hi)) * (heart_size + heart_gap);
+            // Heart background (dark)
+            count = addQuad(&verts, count, hx, hearts_y, heart_size, heart_size, 0.2, 0.0, 0.0, 0.7);
+            // Filled heart (red)
+            if (hi < filled_hearts) {
+                count = addQuad(&verts, count, hx + 1, hearts_y + 1, heart_size - 2, heart_size - 2, 0.9, 0.15, 0.15, 1.0);
+            }
+        }
 
-        // --- Hunger bar (bottom-right) ---
-        const hunger_frac = self.renderer.hud_hunger;
-        const hunger_x: f32 = sw - 220.0;
-        count = addQuad(&verts, count, hunger_x, hbar_y, hbar_w, hbar_h, 0.15, 0.1, 0.02, 0.8);
-        count = addQuad(&verts, count, hunger_x, hbar_y, hbar_w * hunger_frac, hbar_h, 0.7, 0.4, 0.05, 1.0);
+        // === HUNGER (individual drumstick squares, right of health) ===
+        const hunger_y: f32 = sh - 52.0;
+        const hunger_x: f32 = sw / 2.0 + 2.0;
+        const total_drumsticks: u32 = 10;
+        const filled_drumsticks: u32 = self.player_stats.getHungerDrumsticks();
+        var di: u32 = 0;
+        while (di < total_drumsticks) : (di += 1) {
+            const dx = hunger_x + @as(f32, @floatFromInt(di)) * (heart_size + heart_gap);
+            // Background (dark)
+            count = addQuad(&verts, count, dx, hunger_y, heart_size, heart_size, 0.1, 0.08, 0.0, 0.7);
+            // Filled (golden brown)
+            if (di < filled_drumsticks) {
+                count = addQuad(&verts, count, dx + 1, hunger_y + 1, heart_size - 2, heart_size - 2, 0.75, 0.5, 0.1, 1.0);
+            }
+        }
 
-        // --- Hotbar (bottom-center) ---
-        const slot_size: f32 = 28.0;
-        const slot_gap: f32 = 3.0;
+        // === XP BAR (green, centered above hotbar) ===
+        const xp_progress = self.xp.getProgress();
+        const xp_bar_w: f32 = 182.0;
+        const xp_bar_h: f32 = 5.0;
+        const xp_bar_x = (sw - xp_bar_w) / 2.0;
+        const xp_bar_y = sh - 38.0;
+        // Background
+        count = addQuad(&verts, count, xp_bar_x, xp_bar_y, xp_bar_w, xp_bar_h, 0.0, 0.1, 0.0, 0.6);
+        // Filled (bright green)
+        if (xp_progress > 0.001) {
+            count = addQuad(&verts, count, xp_bar_x, xp_bar_y, xp_bar_w * xp_progress, xp_bar_h, 0.3, 0.9, 0.1, 0.9);
+        }
+
+        // === HOTBAR (bottom-center, Minecraft-style) ===
+        const slot_size: f32 = 22.0;
+        const slot_gap: f32 = 2.0;
         const hotbar_total = 9.0 * slot_size + 8.0 * slot_gap;
         const hotbar_x = (sw - hotbar_total) / 2.0;
-        const hotbar_y: f32 = sh - 60.0;
+        const hotbar_y: f32 = sh - 26.0;
+        // Hotbar background
+        count = addQuad(&verts, count, hotbar_x - 4, hotbar_y - 4, hotbar_total + 8, slot_size + 8, 0.1, 0.1, 0.1, 0.75);
         var slot_i: u32 = 0;
         while (slot_i < 9) : (slot_i += 1) {
             const sx = hotbar_x + @as(f32, @floatFromInt(slot_i)) * (slot_size + slot_gap);
             if (slot_i == self.selected_slot) {
-                count = addQuad(&verts, count, sx - 2, hotbar_y - 2, slot_size + 4, slot_size + 4, 1, 1, 1, 0.9);
+                // Selected: bright border
+                count = addQuad(&verts, count, sx - 2, hotbar_y - 2, slot_size + 4, slot_size + 4, 0.9, 0.9, 0.9, 0.95);
             }
-            count = addQuad(&verts, count, sx, hotbar_y, slot_size, slot_size, 0.15, 0.15, 0.15, 0.85);
+            // Slot interior
+            count = addQuad(&verts, count, sx, hotbar_y, slot_size, slot_size, 0.2, 0.2, 0.2, 0.9);
+            // Item color indicator (if slot has item)
+            const slot = self.inventory.getSlot(@intCast(slot_i));
+            if (!slot.isEmpty()) {
+                const item_color = block.getBlockColor(@intCast(@min(slot.item, 119)));
+                count = addQuad(&verts, count, sx + 3, hotbar_y + 3, slot_size - 6, slot_size - 6, item_color[0], item_color[1], item_color[2], 1.0);
+            }
         }
 
-        // --- Chat indicator (when chat is open) ---
+        // === CHAT OVERLAY ===
         if (self.chat_open) {
-            // Dark semi-transparent bar at bottom
-            count = addQuad(&verts, count, 0, sh - 30, sw, 30, 0.0, 0.0, 0.0, 0.7);
-            // White cursor indicator
-            const cursor_x: f32 = 10.0 + @as(f32, @floatFromInt(self.command_len)) * 8.0;
-            count = addQuad(&verts, count, cursor_x, sh - 25, 2, 20, 1, 1, 1, 1);
-            // ">" prompt indicator
-            count = addQuad(&verts, count, 4, sh - 25, 6, 20, 0.8, 0.8, 0.8, 1);
+            count = addQuad(&verts, count, 10, sh - 34, sw - 20, 28, 0.0, 0.0, 0.0, 0.75);
+            const cursor_x: f32 = 16.0 + @as(f32, @floatFromInt(self.command_len)) * 7.0;
+            count = addQuad(&verts, count, cursor_x, sh - 30, 2, 20, 1, 1, 1, 1);
+            count = addQuad(&verts, count, 12, sh - 30, 4, 20, 0.6, 0.9, 0.6, 1);
         }
 
-        // --- Death overlay ---
+        // === DEATH OVERLAY ===
         if (self.player_stats.is_dead) {
-            // Red semi-transparent overlay
-            count = addQuad(&verts, count, 0, 0, sw, sh, 0.6, 0.0, 0.0, 0.5);
-            // "DEAD" indicator bar at center
-            count = addQuad(&verts, count, cx - 60, cy - 10, 120, 20, 0.8, 0.1, 0.1, 0.9);
+            count = addQuad(&verts, count, 0, 0, sw, sh, 0.5, 0.0, 0.0, 0.6);
+            count = addQuad(&verts, count, cx - 80, cy - 15, 160, 30, 0.15, 0.0, 0.0, 0.9);
+            // "R to respawn" indicator bar
+            count = addQuad(&verts, count, cx - 50, cy + 20, 100, 4, 0.8, 0.8, 0.8, 0.7);
         }
 
         self.renderer.uploadUiVertices(verts[0..count]) catch {};
