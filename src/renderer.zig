@@ -223,6 +223,22 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     self.current_sky_color = .{ 0.53, 0.81, 0.92 };
     self.current_fog_color = .{ 0.60, 0.82, 0.90 };
 
+    // Initialize UI pipeline state
+    self.ui_vertex_buffer = .null_handle;
+    self.ui_vertex_memory = .null_handle;
+    self.ui_vertex_count = 0;
+    self.hud_health = 1.0;
+    self.hud_hunger = 1.0;
+    self.hud_selected_slot = 0.0;
+
+    // Initialize entity/particle draw lists
+    self.entity_draw_count = 0;
+    self.particle_draw_count = 0;
+    self.entity_cube_buffer = .null_handle;
+    self.entity_cube_memory = .null_handle;
+    self.entity_cube_index_buffer = .null_handle;
+    self.entity_cube_index_memory = .null_handle;
+
     return self;
 }
 
