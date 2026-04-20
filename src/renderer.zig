@@ -2,6 +2,7 @@ const std = @import("std");
 const vk = @import("vulkan");
 const zglfw = @import("zglfw");
 const pipeline_mod = @import("pipeline.zig");
+const ui_pipeline_mod = @import("ui_pipeline.zig");
 const mesh_indexed = @import("world/mesh_indexed.zig");
 
 const Self = @This();
@@ -73,6 +74,13 @@ present_family: u32,
 // Graphics pipeline
 terrain_pipeline: vk.Pipeline,
 terrain_pipeline_layout: vk.PipelineLayout,
+
+// UI overlay pipeline (2D, alpha blended, no depth)
+ui_pipeline: vk.Pipeline,
+ui_pipeline_layout: vk.PipelineLayout,
+ui_vertex_buffer: vk.Buffer = .null_handle,
+ui_vertex_memory: vk.DeviceMemory = .null_handle,
+ui_vertex_count: u32 = 0,
 
 // Per-chunk render data
 chunk_renders: std.ArrayList(ChunkRenderData),
@@ -196,6 +204,19 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     self.terrain_pipeline = pl.pipeline;
     self.terrain_pipeline_layout = pl.layout;
 
+    // Create UI overlay pipeline
+    const ui_vert_spv: []align(4) const u8 = @alignCast(@embedFile("shaders/ui.vert.spv"));
+    const ui_frag_spv: []align(4) const u8 = @alignCast(@embedFile("shaders/ui.frag.spv"));
+    const ui_pl = try ui_pipeline_mod.create(
+        self.device,
+        self.vkd,
+        self.render_pass,
+        ui_vert_spv,
+        ui_frag_spv,
+    );
+    self.ui_pipeline = ui_pl.pipeline;
+    self.ui_pipeline_layout = ui_pl.layout;
+
     // Initialize per-chunk render data list
     self.chunk_renders = std.ArrayList(ChunkRenderData).empty;
     self.current_vp = std.mem.zeroes([4][4]f32);
@@ -214,6 +235,12 @@ pub fn deinit(self: *Self) void {
     self.chunk_renders.deinit(self.allocator);
     self.vkd.destroyPipeline(self.device, self.terrain_pipeline, null);
     self.vkd.destroyPipelineLayout(self.device, self.terrain_pipeline_layout, null);
+    self.vkd.destroyPipeline(self.device, self.ui_pipeline, null);
+    self.vkd.destroyPipelineLayout(self.device, self.ui_pipeline_layout, null);
+    if (self.ui_vertex_buffer != .null_handle) {
+        self.vkd.destroyBuffer(self.device, self.ui_vertex_buffer, null);
+        self.vkd.freeMemory(self.device, self.ui_vertex_memory, null);
+    }
     self.vkd.destroyRenderPass(self.device, self.render_pass, null);
     self.destroyDepthResources();
     self.destroySwapchain();
@@ -319,6 +346,28 @@ pub fn submitParticleDraw(self: *Self, draw: ParticleDraw) void {
 
 pub fn clearParticleDraws(self: *Self) void {
     self.particle_draw_count = 0;
+}
+
+pub fn uploadUiVertices(self: *Self, vertices: []const ui_pipeline_mod.UiVertex) !void {
+    if (vertices.len == 0) {
+        self.ui_vertex_count = 0;
+        return;
+    }
+    // Recreate buffer each frame (simple approach)
+    if (self.ui_vertex_buffer != .null_handle) {
+        self.vkd.destroyBuffer(self.device, self.ui_vertex_buffer, null);
+        self.vkd.freeMemory(self.device, self.ui_vertex_memory, null);
+    }
+    const buffer_size: vk.DeviceSize = @intCast(vertices.len * @sizeOf(ui_pipeline_mod.UiVertex));
+    const buf = try self.createHostBuffer(.{ .vertex_buffer_bit = true }, buffer_size);
+    self.ui_vertex_buffer = buf.buffer;
+    self.ui_vertex_memory = buf.memory;
+    // Map + copy
+    const data_ptr = try self.vkd.mapMemory(self.device, self.ui_vertex_memory, 0, buffer_size, .{});
+    const dst: [*]ui_pipeline_mod.UiVertex = @ptrCast(@alignCast(data_ptr));
+    @memcpy(dst[0..vertices.len], vertices);
+    self.vkd.unmapMemory(self.device, self.ui_vertex_memory);
+    self.ui_vertex_count = @intCast(vertices.len);
 }
 
 // --- Private helpers ---
@@ -894,6 +943,45 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
             const p_indices: u32 = @min(6, first_chunk_p.index_count);
             self.vkd.cmdDrawIndexed(cmd, p_indices, 1, 0, 0, 0);
         }
+    }
+
+    // === UI Overlay Pass (same render pass, different pipeline) ===
+    if (self.ui_vertex_count > 0 and self.ui_vertex_buffer != .null_handle) {
+        self.vkd.cmdBindPipeline(cmd, .graphics, self.ui_pipeline);
+
+        // Same viewport/scissor
+        self.vkd.cmdSetViewport(cmd, 0, 1, &.{vk.Viewport{
+            .x = 0.0,
+            .y = 0.0,
+            .width = @floatFromInt(self.swapchain_extent.width),
+            .height = @floatFromInt(self.swapchain_extent.height),
+            .min_depth = 0.0,
+            .max_depth = 1.0,
+        }});
+        self.vkd.cmdSetScissor(cmd, 0, 1, &.{vk.Rect2D{
+            .offset = .{ .x = 0, .y = 0 },
+            .extent = self.swapchain_extent,
+        }});
+
+        // Push screen dimensions for NDC conversion
+        const ui_push = ui_pipeline_mod.UiPushConstants{
+            .screen_width = @floatFromInt(self.swapchain_extent.width),
+            .screen_height = @floatFromInt(self.swapchain_extent.height),
+        };
+        self.vkd.cmdPushConstants(
+            cmd,
+            self.ui_pipeline_layout,
+            .{ .vertex_bit = true },
+            0,
+            @sizeOf(ui_pipeline_mod.UiPushConstants),
+            @ptrCast(&ui_push),
+        );
+
+        // Bind UI vertex buffer and draw
+        const ui_offsets = [_]vk.DeviceSize{0};
+        const ui_bufs = [_]vk.Buffer{self.ui_vertex_buffer};
+        self.vkd.cmdBindVertexBuffers(cmd, 0, 1, &ui_bufs, &ui_offsets);
+        self.vkd.cmdDraw(cmd, self.ui_vertex_count, 1, 0, 0);
     }
 
     self.vkd.cmdEndRenderPass(cmd);

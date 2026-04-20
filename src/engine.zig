@@ -74,6 +74,7 @@ pub const music_mod = @import("gameplay/music.zig");
 pub const map_item_mod = @import("gameplay/map_item.zig");
 pub const automation_mod = @import("gameplay/automation.zig");
 pub const netherite = @import("gameplay/netherite.zig");
+const ui_pipeline_mod = @import("ui_pipeline.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -1113,9 +1114,81 @@ pub const Engine = struct {
         self.renderer.hud_hunger = @as(f32, @floatFromInt(self.player_stats.getHungerDrumsticks())) / 10.0;
         self.renderer.hud_selected_slot = @floatFromInt(self.selected_slot);
 
+        // Generate and upload UI overlay vertices
+        self.generateAndUploadUi();
+
         self.renderer.drawFrame(vp_arr, sky_color, fog_color) catch |err| {
             std.debug.print("Render error: {}\n", .{err});
         };
+    }
+
+    fn generateAndUploadUi(self: *Engine) void {
+        const V = ui_pipeline_mod.UiVertex;
+        var verts: [512]V = undefined;
+        var count: u32 = 0;
+
+        const sw: f32 = 1280.0; // screen width
+        const sh: f32 = 720.0; // screen height
+        const cx = sw / 2.0;
+        const cy = sh / 2.0;
+
+        // --- Crosshair (white +) ---
+        // Horizontal bar
+        const ch_len: f32 = 12.0;
+        const ch_thick: f32 = 2.0;
+        count = addQuad(&verts, count, cx - ch_len, cy - ch_thick / 2, ch_len * 2, ch_thick, 1, 1, 1, 1);
+        // Vertical bar
+        count = addQuad(&verts, count, cx - ch_thick / 2, cy - ch_len, ch_thick, ch_len * 2, 1, 1, 1, 1);
+
+        // --- Health bar (bottom-left) ---
+        const hbar_x: f32 = 20.0;
+        const hbar_y: f32 = sh - 40.0;
+        const hbar_w: f32 = 200.0;
+        const hbar_h: f32 = 14.0;
+        const hp_frac = self.renderer.hud_health;
+        // Background
+        count = addQuad(&verts, count, hbar_x, hbar_y, hbar_w, hbar_h, 0.2, 0.05, 0.05, 0.8);
+        // Filled
+        count = addQuad(&verts, count, hbar_x, hbar_y, hbar_w * hp_frac, hbar_h, 0.85, 0.1, 0.1, 1.0);
+
+        // --- Hunger bar (bottom-right) ---
+        const hunger_frac = self.renderer.hud_hunger;
+        const hunger_x: f32 = sw - 220.0;
+        count = addQuad(&verts, count, hunger_x, hbar_y, hbar_w, hbar_h, 0.15, 0.1, 0.02, 0.8);
+        count = addQuad(&verts, count, hunger_x, hbar_y, hbar_w * hunger_frac, hbar_h, 0.7, 0.4, 0.05, 1.0);
+
+        // --- Hotbar (bottom-center) ---
+        const slot_size: f32 = 28.0;
+        const slot_gap: f32 = 3.0;
+        const hotbar_total = 9.0 * slot_size + 8.0 * slot_gap;
+        const hotbar_x = (sw - hotbar_total) / 2.0;
+        const hotbar_y: f32 = sh - 22.0;
+        var slot_i: u32 = 0;
+        while (slot_i < 9) : (slot_i += 1) {
+            const sx = hotbar_x + @as(f32, @floatFromInt(slot_i)) * (slot_size + slot_gap);
+            if (slot_i == self.selected_slot) {
+                // Selected slot: white border
+                count = addQuad(&verts, count, sx - 2, hotbar_y - 2, slot_size + 4, slot_size + 4, 1, 1, 1, 0.9);
+            }
+            // Slot background
+            count = addQuad(&verts, count, sx, hotbar_y, slot_size, slot_size, 0.15, 0.15, 0.15, 0.85);
+        }
+
+        // Upload to renderer
+        self.renderer.uploadUiVertices(verts[0..count]) catch {};
+    }
+
+    fn addQuad(verts: []ui_pipeline_mod.UiVertex, start: u32, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) u32 {
+        if (start + 6 > verts.len) return start;
+        const V = ui_pipeline_mod.UiVertex;
+        // Two triangles for a quad
+        verts[start + 0] = V{ .pos_x = x, .pos_y = y, .r = r, .g = g, .b = b, .a = a };
+        verts[start + 1] = V{ .pos_x = x + w, .pos_y = y, .r = r, .g = g, .b = b, .a = a };
+        verts[start + 2] = V{ .pos_x = x + w, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a };
+        verts[start + 3] = V{ .pos_x = x, .pos_y = y, .r = r, .g = g, .b = b, .a = a };
+        verts[start + 4] = V{ .pos_x = x + w, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a };
+        verts[start + 5] = V{ .pos_x = x, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a };
+        return start + 6;
     }
 
     fn updateChunkLoading(self: *Engine) void {
