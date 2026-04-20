@@ -511,6 +511,27 @@ pub fn build(b: *std.Build) void {
     });
     const run_creeper_tests = b.addRunArtifact(creeper_tests);
 
+
+    // Combat mechanics tests
+    const combat_mechanics_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/combat_mechanics.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_combat_mechanics_tests = b.addRunArtifact(combat_mechanics_tests);
+
+    // Redstone components tests (observer, daylight detector, torch, lamp, target, note block, sculk sensor)
+    const redstone_components_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/redstone/components.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_redstone_components_tests = b.addRunArtifact(redstone_components_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -556,4 +577,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_loot_tables_tests.step);
     test_step.dependOn(&run_recipe_book_tests.step);
     test_step.dependOn(&run_creeper_tests.step);
+    test_step.dependOn(&run_combat_mechanics_tests.step);
+    test_step.dependOn(&run_redstone_components_tests.step);
 }
