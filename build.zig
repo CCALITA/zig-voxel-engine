@@ -501,6 +501,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_recipe_book_tests = b.addRunArtifact(recipe_book_tests);
 
+    // Extended enchantments tests
+    const enchantments_extended_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/enchantments_extended.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_enchantments_extended_tests = b.addRunArtifact(enchantments_extended_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -545,4 +555,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_nbt_tests.step);
     test_step.dependOn(&run_loot_tables_tests.step);
     test_step.dependOn(&run_recipe_book_tests.step);
+    test_step.dependOn(&run_enchantments_extended_tests.step);
 }
