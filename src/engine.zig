@@ -1127,17 +1127,16 @@ pub const Engine = struct {
         var verts: [512]V = undefined;
         var count: u32 = 0;
 
-        const sw: f32 = 1280.0; // screen width
-        const sh: f32 = 720.0; // screen height
+        // Use actual screen dimensions from renderer
+        const sw: f32 = @floatFromInt(self.renderer.swapchain_extent.width);
+        const sh: f32 = @floatFromInt(self.renderer.swapchain_extent.height);
         const cx = sw / 2.0;
         const cy = sh / 2.0;
 
         // --- Crosshair (white +) ---
-        // Horizontal bar
         const ch_len: f32 = 12.0;
         const ch_thick: f32 = 2.0;
         count = addQuad(&verts, count, cx - ch_len, cy - ch_thick / 2, ch_len * 2, ch_thick, 1, 1, 1, 1);
-        // Vertical bar
         count = addQuad(&verts, count, cx - ch_thick / 2, cy - ch_len, ch_thick, ch_len * 2, 1, 1, 1, 1);
 
         // --- Health bar (bottom-left) ---
@@ -1146,9 +1145,7 @@ pub const Engine = struct {
         const hbar_w: f32 = 200.0;
         const hbar_h: f32 = 14.0;
         const hp_frac = self.renderer.hud_health;
-        // Background
         count = addQuad(&verts, count, hbar_x, hbar_y, hbar_w, hbar_h, 0.2, 0.05, 0.05, 0.8);
-        // Filled
         count = addQuad(&verts, count, hbar_x, hbar_y, hbar_w * hp_frac, hbar_h, 0.85, 0.1, 0.1, 1.0);
 
         // --- Hunger bar (bottom-right) ---
@@ -1162,19 +1159,35 @@ pub const Engine = struct {
         const slot_gap: f32 = 3.0;
         const hotbar_total = 9.0 * slot_size + 8.0 * slot_gap;
         const hotbar_x = (sw - hotbar_total) / 2.0;
-        const hotbar_y: f32 = sh - 22.0;
+        const hotbar_y: f32 = sh - 60.0;
         var slot_i: u32 = 0;
         while (slot_i < 9) : (slot_i += 1) {
             const sx = hotbar_x + @as(f32, @floatFromInt(slot_i)) * (slot_size + slot_gap);
             if (slot_i == self.selected_slot) {
-                // Selected slot: white border
                 count = addQuad(&verts, count, sx - 2, hotbar_y - 2, slot_size + 4, slot_size + 4, 1, 1, 1, 0.9);
             }
-            // Slot background
             count = addQuad(&verts, count, sx, hotbar_y, slot_size, slot_size, 0.15, 0.15, 0.15, 0.85);
         }
 
-        // Upload to renderer
+        // --- Chat indicator (when chat is open) ---
+        if (self.chat_open) {
+            // Dark semi-transparent bar at bottom
+            count = addQuad(&verts, count, 0, sh - 30, sw, 30, 0.0, 0.0, 0.0, 0.7);
+            // White cursor indicator
+            const cursor_x: f32 = 10.0 + @as(f32, @floatFromInt(self.command_len)) * 8.0;
+            count = addQuad(&verts, count, cursor_x, sh - 25, 2, 20, 1, 1, 1, 1);
+            // ">" prompt indicator
+            count = addQuad(&verts, count, 4, sh - 25, 6, 20, 0.8, 0.8, 0.8, 1);
+        }
+
+        // --- Death overlay ---
+        if (self.player_stats.is_dead) {
+            // Red semi-transparent overlay
+            count = addQuad(&verts, count, 0, 0, sw, sh, 0.6, 0.0, 0.0, 0.5);
+            // "DEAD" indicator bar at center
+            count = addQuad(&verts, count, cx - 60, cy - 10, 120, 20, 0.8, 0.1, 0.1, 0.9);
+        }
+
         self.renderer.uploadUiVertices(verts[0..count]) catch {};
     }
 
@@ -1656,13 +1669,16 @@ pub const Engine = struct {
             if (t_just_pressed) {
                 self.chat_open = true;
                 self.command_len = 0;
+                std.debug.print("[Chat] Opened (type command, Enter to execute, Escape to close)\n", .{});
             }
             return;
         }
 
-        // Chat is open: Escape closes it
-        if (self.window.handle.getKey(.escape) == .press) {
+        // Chat is open: Escape or T again closes it
+        const esc_pressed = self.window.handle.getKey(.escape) == .press;
+        if (esc_pressed or t_just_pressed) {
             self.chat_open = false;
+            std.debug.print("[Chat] Closed\n", .{});
             return;
         }
 
@@ -1672,7 +1688,9 @@ pub const Engine = struct {
                 const input = self.command_buffer[0..self.command_len];
                 const cmd = command_mod.parse(input);
                 const result = command_mod.execute(cmd, input);
-                std.debug.print("[CMD] {s}\n", .{result.message});
+                std.debug.print("[CMD] {s}\n", .{result.message[0..result.message_len]});
+            } else {
+                std.debug.print("[Chat] Empty command — closing\n", .{});
             }
             self.chat_open = false;
             return;
