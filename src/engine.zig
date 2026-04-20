@@ -1434,22 +1434,15 @@ pub const Engine = struct {
                 }
             }
 
-            // === Mouse cursor (white arrow-like shape) ===
-            const cur = self.window.handle.getCursorPos();
-            const cmx: f32 = @floatCast(cur[0]);
-            const cmy: f32 = @floatCast(cur[1]);
-            // Cursor shadow
-            count = addQuad(&verts, count, cmx + 1, cmy + 1, 12, 18, 0, 0, 0, 0.6);
-            // Cursor body (white triangle approximation)
-            count = addQuad(&verts, count, cmx, cmy, 3, 16, 1, 1, 1, 1);
-            count = addQuad(&verts, count, cmx + 3, cmy + 4, 3, 12, 1, 1, 1, 1);
-            count = addQuad(&verts, count, cmx + 6, cmy + 8, 3, 8, 1, 1, 1, 1);
-            count = addQuad(&verts, count, cmx + 9, cmy + 12, 3, 4, 0.9, 0.9, 0.9, 1);
-
-            // Cursor item (if holding an item)
+            // === Cursor item follows OS cursor (if holding an item) ===
             if (!self.cursor_item.isEmpty()) {
+                const cur = self.window.handle.getCursorPos();
+                const scale = self.window.handle.getContentScale();
+                const cmx: f32 = @as(f32, @floatCast(cur[0])) * scale[0];
+                const cmy: f32 = @as(f32, @floatCast(cur[1])) * scale[1];
                 const cic = block.getBlockColor(@intCast(@min(self.cursor_item.item, 119)));
-                count = addQuad(&verts, count, cmx + 8, cmy + 8, 24, 24, cic[0], cic[1], cic[2], 0.9);
+                count = addQuad(&verts, count, cmx + 10, cmy + 10, 28, 28, cic[0], cic[1], cic[2], 0.9);
+                count = addQuad(&verts, count, cmx + 10, cmy + 10, 28, 28, 0, 0, 0, 0.15);
             }
         }
 
@@ -1464,8 +1457,9 @@ pub const Engine = struct {
         if (!left_just) return;
 
         const cursor = self.window.handle.getCursorPos();
-        const mx: f32 = @floatCast(cursor[0]);
-        const my: f32 = @floatCast(cursor[1]);
+        const scale = self.window.handle.getContentScale();
+        const mx: f32 = @as(f32, @floatCast(cursor[0])) * scale[0];
+        const my: f32 = @as(f32, @floatCast(cursor[1])) * scale[1];
 
         const sw: f32 = @floatFromInt(self.renderer.swapchain_extent.width);
         const sh: f32 = @floatFromInt(self.renderer.swapchain_extent.height);
