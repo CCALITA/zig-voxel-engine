@@ -246,6 +246,9 @@ pub const Engine = struct {
     last_e_press: bool = false,
     // Hand swing animation timer
     hand_swing_timer: f32 = 0.0,
+    // Cursor item for inventory drag
+    cursor_item: inventory_mod.Slot = inventory_mod.Slot.empty,
+    last_inv_click: bool = false,
 
     const FurnaceEntry = struct {
         x: i32,
@@ -548,6 +551,8 @@ pub const Engine = struct {
                     self.chat_open = false;
                 } else if (self.inventory_open) {
                     self.inventory_open = false;
+                    self.window.handle.setInputMode(.cursor, .disabled) catch {};
+                    self.first_mouse = true;
                 } else {
                     self.window.handle.setShouldClose(true);
                 }
@@ -561,14 +566,20 @@ pub const Engine = struct {
                 }
             }
 
-            // Block interaction (left/right mouse click)
-            self.handleBlockInteraction(dt);
+            // Block interaction (left/right mouse click) — skip when inventory is open
+            if (self.inventory_open) {
+                self.handleInventoryClick();
+            } else {
+                self.handleBlockInteraction(dt);
+            }
 
             // Portal key: P toggles between overworld and nether
             const p_pressed = self.window.handle.getKey(.p) == .press;
             if (p_pressed and !self.last_p_press) {
-                self.renderer.waitIdle();
                 self.switchDimension();
+                self.last_p_press = p_pressed;
+                self.renderFrame(dt);
+                continue;
             }
             self.last_p_press = p_pressed;
 
@@ -606,6 +617,12 @@ pub const Engine = struct {
             const e_pressed = self.window.handle.getKey(.e) == .press;
             if (e_pressed and !self.last_e_press and !self.chat_open) {
                 self.inventory_open = !self.inventory_open;
+                if (self.inventory_open) {
+                    self.window.handle.setInputMode(.cursor, .normal) catch {};
+                } else {
+                    self.window.handle.setInputMode(.cursor, .disabled) catch {};
+                    self.first_mouse = true;
+                }
             }
             self.last_e_press = e_pressed;
 
@@ -1098,15 +1115,16 @@ pub const Engine = struct {
         self.player_vy = 0.0;
         self.on_ground = false;
 
-        // Clear all rendered chunks (GPU resources)
+        // Wait for ALL GPU work to finish before destroying any buffers
+        self.renderer.waitIdle();
+
+        // Clear all rendered chunks (GPU resources are safe to free now)
         self.renderer.clearChunks();
 
-        // Clear the chunk HashMap
-        var it = self.chunks.iterator();
-        while (it.next()) |_| {}
+        // Clear the chunk HashMap — just clear, don't free the HashMap itself
         self.chunks.clearRetainingCapacity();
 
-        // Reset chunk loader's loaded set (don't deinit — just clear)
+        // Reset chunk loader's loaded set
         self.chunk_loader.loaded.clearRetainingCapacity();
 
         std.debug.print("[Dimension] Now in {s}. Chunks will load next frame.\n", .{
@@ -1303,137 +1321,195 @@ pub const Engine = struct {
 
         // === INVENTORY SCREEN (E key) ===
         if (self.inventory_open) {
-            const inv_w: f32 = 352.0;
-            const inv_h: f32 = 332.0;
+            const slot_s: f32 = 40.0;
+            const slot_pad: f32 = 4.0;
+            const inv_w: f32 = 9.0 * (slot_s + slot_pad) + 24.0;
+            const inv_h: f32 = 420.0;
             const inv_x = (sw - inv_w) / 2.0;
             const inv_y = (sh - inv_h) / 2.0;
 
             // Darkened background overlay
-            count = addQuad(&verts, count, 0, 0, sw, sh, 0, 0, 0, 0.55);
+            count = addQuad(&verts, count, 0, 0, sw, sh, 0, 0, 0, 0.6);
 
-            // Inventory panel background
-            count = addQuad(&verts, count, inv_x - 2, inv_y - 2, inv_w + 4, inv_h + 4, 0.1, 0.1, 0.1, 0.95);
+            // Panel border + background
+            count = addQuad(&verts, count, inv_x - 4, inv_y - 4, inv_w + 8, inv_h + 8, 0.15, 0.15, 0.15, 0.98);
             count = addQuad(&verts, count, inv_x, inv_y, inv_w, inv_h, 0.55, 0.55, 0.55, 0.95);
 
-            // Title area
-            count = addQuad(&verts, count, inv_x, inv_y, inv_w, 24, 0.45, 0.45, 0.45, 1.0);
-            // Title indicator bar
-            count = addQuad(&verts, count, inv_x + 8, inv_y + 8, 60, 8, 0.9, 0.9, 0.9, 0.7);
-
-            const slot_s: f32 = 32.0;
-            const slot_pad: f32 = 4.0;
+            // Title bar
+            count = addQuad(&verts, count, inv_x, inv_y, inv_w, 30, 0.40, 0.40, 0.40, 1.0);
+            count = addQuad(&verts, count, inv_x + 10, inv_y + 10, 80, 10, 0.9, 0.9, 0.9, 0.6);
 
             // === Crafting grid (2x2) — top right ===
-            const craft_x = inv_x + inv_w - 90;
-            const craft_y = inv_y + 34;
-            // Crafting label bar
-            count = addQuad(&verts, count, craft_x - 4, craft_y - 2, 80, 3, 0.7, 0.5, 0.2, 0.8);
+            const craft_x = inv_x + inv_w - 120;
+            const craft_y = inv_y + 44;
+            count = addQuad(&verts, count, craft_x - 6, craft_y - 4, 100, 3, 0.7, 0.5, 0.2, 0.8);
             var cy_i: u32 = 0;
             while (cy_i < 2) : (cy_i += 1) {
                 var cx_i: u32 = 0;
                 while (cx_i < 2) : (cx_i += 1) {
                     const gx = craft_x + @as(f32, @floatFromInt(cx_i)) * (slot_s + slot_pad);
                     const gy = craft_y + @as(f32, @floatFromInt(cy_i)) * (slot_s + slot_pad);
-                    count = addQuad(&verts, count, gx, gy, slot_s, slot_s, 0.35, 0.35, 0.35, 1.0);
-                    count = addQuad(&verts, count, gx + 1, gy + 1, slot_s - 2, slot_s - 2, 0.45, 0.45, 0.45, 0.9);
+                    count = addQuad(&verts, count, gx, gy, slot_s, slot_s, 0.30, 0.30, 0.30, 1.0);
+                    count = addQuad(&verts, count, gx + 2, gy + 2, slot_s - 4, slot_s - 4, 0.42, 0.42, 0.42, 0.9);
                 }
             }
-            // Crafting output slot
-            count = addQuad(&verts, count, craft_x + 82, craft_y + 14, slot_s + 4, slot_s + 4, 0.3, 0.3, 0.3, 1.0);
-            count = addQuad(&verts, count, craft_x + 84, craft_y + 16, slot_s, slot_s, 0.5, 0.5, 0.5, 0.9);
-            // Arrow indicator
-            count = addQuad(&verts, count, craft_x + 72, craft_y + 24, 8, 3, 0.8, 0.8, 0.8, 0.6);
+            // Crafting output
+            count = addQuad(&verts, count, craft_x + 100, craft_y + 18, slot_s + 6, slot_s + 6, 0.25, 0.25, 0.25, 1.0);
+            count = addQuad(&verts, count, craft_x + 103, craft_y + 21, slot_s, slot_s, 0.45, 0.45, 0.45, 0.9);
+            // Arrow
+            count = addQuad(&verts, count, craft_x + 88, craft_y + 30, 10, 4, 0.8, 0.8, 0.8, 0.5);
 
             // === Armor slots (left column) ===
-            const armor_x = inv_x + 12;
-            const armor_y = inv_y + 34;
+            const armor_x = inv_x + 14;
+            const armor_y = inv_y + 44;
+            const armor_icons = [4][3]f32{
+                .{ 0.6, 0.6, 0.7 },
+                .{ 0.5, 0.5, 0.6 },
+                .{ 0.5, 0.5, 0.6 },
+                .{ 0.4, 0.4, 0.5 },
+            };
             var ai: u32 = 0;
             while (ai < 4) : (ai += 1) {
                 const ay = armor_y + @as(f32, @floatFromInt(ai)) * (slot_s + slot_pad);
-                count = addQuad(&verts, count, armor_x, ay, slot_s, slot_s, 0.35, 0.35, 0.35, 1.0);
-                count = addQuad(&verts, count, armor_x + 1, ay + 1, slot_s - 2, slot_s - 2, 0.42, 0.42, 0.42, 0.9);
-                // Armor icon placeholder (small colored square)
-                const armor_colors = [4][3]f32{
-                    .{ 0.6, 0.6, 0.7 }, // helmet
-                    .{ 0.5, 0.5, 0.6 }, // chestplate
-                    .{ 0.5, 0.5, 0.6 }, // leggings
-                    .{ 0.4, 0.4, 0.5 }, // boots
-                };
-                count = addQuad(&verts, count, armor_x + 8, ay + 8, 16, 16, armor_colors[ai][0], armor_colors[ai][1], armor_colors[ai][2], 0.3);
+                count = addQuad(&verts, count, armor_x, ay, slot_s, slot_s, 0.30, 0.30, 0.30, 1.0);
+                count = addQuad(&verts, count, armor_x + 2, ay + 2, slot_s - 4, slot_s - 4, 0.40, 0.40, 0.40, 0.9);
+                count = addQuad(&verts, count, armor_x + 10, ay + 10, 20, 20, armor_icons[ai][0], armor_icons[ai][1], armor_icons[ai][2], 0.25);
             }
 
-            // === Player silhouette (center, between armor and crafting) ===
-            const player_cx = inv_x + 90;
-            const player_cy = inv_y + 38;
-            // Body
-            count = addQuad(&verts, count, player_cx + 15, player_cy + 20, 20, 30, 0.3, 0.6, 0.3, 0.8);
-            // Head
-            count = addQuad(&verts, count, player_cx + 13, player_cy, 24, 24, 0.76, 0.57, 0.43, 0.9);
-            // Eyes
-            count = addQuad(&verts, count, player_cx + 17, player_cy + 10, 5, 4, 0.2, 0.2, 0.2, 0.9);
-            count = addQuad(&verts, count, player_cx + 28, player_cy + 10, 5, 4, 0.2, 0.2, 0.2, 0.9);
-            // Legs
-            count = addQuad(&verts, count, player_cx + 15, player_cy + 50, 9, 24, 0.25, 0.25, 0.55, 0.8);
-            count = addQuad(&verts, count, player_cx + 26, player_cy + 50, 9, 24, 0.25, 0.25, 0.55, 0.8);
-            // Arms
-            count = addQuad(&verts, count, player_cx + 5, player_cy + 22, 10, 26, 0.76, 0.57, 0.43, 0.8);
-            count = addQuad(&verts, count, player_cx + 35, player_cy + 22, 10, 26, 0.76, 0.57, 0.43, 0.8);
+            // === Player model (center) ===
+            const pcx = inv_x + 110;
+            const pcy = inv_y + 48;
+            count = addQuad(&verts, count, pcx + 18, pcy + 28, 24, 36, 0.25, 0.55, 0.25, 0.85);
+            count = addQuad(&verts, count, pcx + 16, pcy, 28, 28, 0.76, 0.57, 0.43, 0.9);
+            count = addQuad(&verts, count, pcx + 20, pcy + 12, 6, 5, 0.15, 0.15, 0.15, 0.9);
+            count = addQuad(&verts, count, pcx + 34, pcy + 12, 6, 5, 0.15, 0.15, 0.15, 0.9);
+            count = addQuad(&verts, count, pcx + 18, pcy + 64, 11, 28, 0.20, 0.20, 0.50, 0.85);
+            count = addQuad(&verts, count, pcx + 31, pcy + 64, 11, 28, 0.20, 0.20, 0.50, 0.85);
+            count = addQuad(&verts, count, pcx + 6, pcy + 30, 12, 30, 0.76, 0.57, 0.43, 0.8);
+            count = addQuad(&verts, count, pcx + 42, pcy + 30, 12, 30, 0.76, 0.57, 0.43, 0.8);
 
             // === Main inventory (3 rows x 9 columns) ===
             const grid_x = inv_x + 12;
-            const grid_y = inv_y + 180;
-            const inv_mod = inventory_mod;
+            const grid_y = inv_y + 200;
             var row: u32 = 0;
             while (row < 3) : (row += 1) {
                 var col: u32 = 0;
                 while (col < 9) : (col += 1) {
                     const sx = grid_x + @as(f32, @floatFromInt(col)) * (slot_s + slot_pad);
                     const sy = grid_y + @as(f32, @floatFromInt(row)) * (slot_s + slot_pad);
-                    // Slot background
-                    count = addQuad(&verts, count, sx, sy, slot_s, slot_s, 0.35, 0.35, 0.35, 1.0);
-                    count = addQuad(&verts, count, sx + 1, sy + 1, slot_s - 2, slot_s - 2, 0.45, 0.45, 0.45, 0.9);
-                    // Item display
-                    const slot_idx: u8 = @intCast(9 + row * 9 + col); // slots 9-35
-                    if (slot_idx < inv_mod.SLOT_COUNT) {
+                    count = addQuad(&verts, count, sx, sy, slot_s, slot_s, 0.30, 0.30, 0.30, 1.0);
+                    count = addQuad(&verts, count, sx + 2, sy + 2, slot_s - 4, slot_s - 4, 0.42, 0.42, 0.42, 0.9);
+                    const slot_idx: u8 = @intCast(9 + row * 9 + col);
+                    if (slot_idx < inventory_mod.SLOT_COUNT) {
                         const slot = self.inventory.getSlot(slot_idx);
                         if (!slot.isEmpty()) {
                             const ic = block.getBlockColor(@intCast(@min(slot.item, 119)));
-                            count = addQuad(&verts, count, sx + 4, sy + 4, slot_s - 8, slot_s - 8, ic[0], ic[1], ic[2], 1.0);
-                            // Stack count indicator (small white square for count > 1)
+                            count = addQuad(&verts, count, sx + 5, sy + 5, slot_s - 10, slot_s - 10, ic[0], ic[1], ic[2], 1.0);
                             if (slot.count > 1) {
-                                count = addQuad(&verts, count, sx + slot_s - 10, sy + slot_s - 10, 8, 8, 1, 1, 1, 0.8);
+                                count = addQuad(&verts, count, sx + slot_s - 12, sy + slot_s - 12, 10, 10, 1, 1, 1, 0.8);
                             }
                         }
                     }
                 }
             }
 
-            // === Hotbar row (bottom of inventory, separated by gap) ===
-            const hb_y = grid_y + 3 * (slot_s + slot_pad) + 8;
-            // Separator line
-            count = addQuad(&verts, count, grid_x, hb_y - 4, 9 * (slot_s + slot_pad) - slot_pad, 1, 0.3, 0.3, 0.3, 0.6);
+            // === Hotbar row ===
+            const hb_y = grid_y + 3 * (slot_s + slot_pad) + 12;
+            count = addQuad(&verts, count, grid_x, hb_y - 6, 9 * (slot_s + slot_pad) - slot_pad, 2, 0.3, 0.3, 0.3, 0.5);
             var hb_i: u32 = 0;
             while (hb_i < 9) : (hb_i += 1) {
                 const hx = grid_x + @as(f32, @floatFromInt(hb_i)) * (slot_s + slot_pad);
-                // Highlight selected slot
                 if (hb_i == self.selected_slot) {
-                    count = addQuad(&verts, count, hx - 2, hb_y - 2, slot_s + 4, slot_s + 4, 0.9, 0.9, 0.9, 0.9);
+                    count = addQuad(&verts, count, hx - 3, hb_y - 3, slot_s + 6, slot_s + 6, 0.9, 0.9, 0.9, 0.9);
                 }
-                count = addQuad(&verts, count, hx, hb_y, slot_s, slot_s, 0.35, 0.35, 0.35, 1.0);
-                count = addQuad(&verts, count, hx + 1, hb_y + 1, slot_s - 2, slot_s - 2, 0.45, 0.45, 0.45, 0.9);
-                // Item display
+                count = addQuad(&verts, count, hx, hb_y, slot_s, slot_s, 0.30, 0.30, 0.30, 1.0);
+                count = addQuad(&verts, count, hx + 2, hb_y + 2, slot_s - 4, slot_s - 4, 0.42, 0.42, 0.42, 0.9);
                 const slot = self.inventory.getSlot(@intCast(hb_i));
                 if (!slot.isEmpty()) {
                     const ic = block.getBlockColor(@intCast(@min(slot.item, 119)));
-                    count = addQuad(&verts, count, hx + 4, hb_y + 4, slot_s - 8, slot_s - 8, ic[0], ic[1], ic[2], 1.0);
+                    count = addQuad(&verts, count, hx + 5, hb_y + 5, slot_s - 10, slot_s - 10, ic[0], ic[1], ic[2], 1.0);
                     if (slot.count > 1) {
-                        count = addQuad(&verts, count, hx + slot_s - 10, hb_y + slot_s - 10, 8, 8, 1, 1, 1, 0.8);
+                        count = addQuad(&verts, count, hx + slot_s - 12, hb_y + slot_s - 12, 10, 10, 1, 1, 1, 0.8);
                     }
                 }
+            }
+
+            // === Mouse cursor (white arrow-like shape) ===
+            const cur = self.window.handle.getCursorPos();
+            const cmx: f32 = @floatCast(cur[0]);
+            const cmy: f32 = @floatCast(cur[1]);
+            // Cursor shadow
+            count = addQuad(&verts, count, cmx + 1, cmy + 1, 12, 18, 0, 0, 0, 0.6);
+            // Cursor body (white triangle approximation)
+            count = addQuad(&verts, count, cmx, cmy, 3, 16, 1, 1, 1, 1);
+            count = addQuad(&verts, count, cmx + 3, cmy + 4, 3, 12, 1, 1, 1, 1);
+            count = addQuad(&verts, count, cmx + 6, cmy + 8, 3, 8, 1, 1, 1, 1);
+            count = addQuad(&verts, count, cmx + 9, cmy + 12, 3, 4, 0.9, 0.9, 0.9, 1);
+
+            // Cursor item (if holding an item)
+            if (!self.cursor_item.isEmpty()) {
+                const cic = block.getBlockColor(@intCast(@min(self.cursor_item.item, 119)));
+                count = addQuad(&verts, count, cmx + 8, cmy + 8, 24, 24, cic[0], cic[1], cic[2], 0.9);
             }
         }
 
         self.renderer.uploadUiVertices(verts[0..count]) catch {};
+    }
+
+    fn handleInventoryClick(self: *Engine) void {
+        const left_pressed = self.window.handle.getMouseButton(.left) == .press;
+        const left_just = left_pressed and !self.last_inv_click;
+        self.last_inv_click = left_pressed;
+
+        if (!left_just) return;
+
+        const cursor = self.window.handle.getCursorPos();
+        const mx: f32 = @floatCast(cursor[0]);
+        const my: f32 = @floatCast(cursor[1]);
+
+        const sw: f32 = @floatFromInt(self.renderer.swapchain_extent.width);
+        const sh: f32 = @floatFromInt(self.renderer.swapchain_extent.height);
+        const slot_s: f32 = 40.0;
+        const slot_pad: f32 = 4.0;
+        const inv_w: f32 = 9.0 * (slot_s + slot_pad) + 24.0;
+        const inv_h: f32 = 420.0;
+        const inv_x = (sw - inv_w) / 2.0;
+        const inv_y = (sh - inv_h) / 2.0;
+        const grid_x = inv_x + 12;
+        const grid_y = inv_y + 200;
+
+        // Check main inventory grid (3x9)
+        var row: u32 = 0;
+        while (row < 3) : (row += 1) {
+            var col: u32 = 0;
+            while (col < 9) : (col += 1) {
+                const sx = grid_x + @as(f32, @floatFromInt(col)) * (slot_s + slot_pad);
+                const sy = grid_y + @as(f32, @floatFromInt(row)) * (slot_s + slot_pad);
+                if (mx >= sx and mx < sx + slot_s and my >= sy and my < sy + slot_s) {
+                    const idx: u8 = @intCast(9 + row * 9 + col);
+                    self.swapCursorWithSlot(idx);
+                    return;
+                }
+            }
+        }
+
+        // Check hotbar row
+        const hb_y = grid_y + 3 * (slot_s + slot_pad) + 12;
+        var hb_i: u32 = 0;
+        while (hb_i < 9) : (hb_i += 1) {
+            const hx = grid_x + @as(f32, @floatFromInt(hb_i)) * (slot_s + slot_pad);
+            if (mx >= hx and mx < hx + slot_s and my >= hb_y and my < hb_y + slot_s) {
+                self.swapCursorWithSlot(@intCast(hb_i));
+                return;
+            }
+        }
+    }
+
+    fn swapCursorWithSlot(self: *Engine, slot_idx: u8) void {
+        if (slot_idx >= inventory_mod.SLOT_COUNT) return;
+        const slot_val = self.inventory.getSlot(slot_idx);
+        self.inventory.slots[slot_idx] = self.cursor_item;
+        self.cursor_item = slot_val;
     }
 
     fn addQuad(verts: []ui_pipeline_mod.UiVertex, start: u32, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) u32 {
