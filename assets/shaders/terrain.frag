@@ -10,6 +10,9 @@ layout(push_constant) uniform PushConstants {
     vec3 fog_color;
     float fog_start;
     float fog_end;
+    float health_fraction;
+    float hunger_fraction;
+    float selected_slot;
 } pc;
 
 layout(location = 0) out vec4 out_color;
@@ -146,6 +149,44 @@ void main() {
     // Distance fog
     float fog_factor = clamp((frag_dist - pc.fog_start) / (pc.fog_end - pc.fog_start), 0.0, 1.0);
     color = mix(color, pc.fog_color, fog_factor);
+
+    // Crosshair overlay: white + at screen center
+    vec2 screen_center = vec2(640.0, 360.0); // approximate for 1280x720
+    vec2 pixel = gl_FragCoord.xy;
+    float dx = abs(pixel.x - screen_center.x);
+    float dy = abs(pixel.y - screen_center.y);
+    bool h_bar = (dx < 8.0 && dy < 1.5);
+    bool v_bar = (dx < 1.5 && dy < 8.0);
+    if (h_bar || v_bar) {
+        color = vec3(1.0, 1.0, 1.0);
+    }
+
+    // Health bar: red bar at bottom-left of screen
+    if (pixel.y > 18.0 && pixel.y < 28.0 && pixel.x > 20.0 && pixel.x < 220.0) {
+        color = vec3(0.3, 0.05, 0.05);
+        if (pixel.x < 20.0 + 200.0 * pc.health_fraction) {
+            color = vec3(0.9, 0.1, 0.1);
+        }
+    }
+
+    // Hunger bar: brown bar at bottom-right
+    if (pixel.y > 18.0 && pixel.y < 28.0 && pixel.x > 1060.0 && pixel.x < 1260.0) {
+        color = vec3(0.15, 0.1, 0.05);
+        if (pixel.x < 1060.0 + 200.0 * pc.hunger_fraction) {
+            color = vec3(0.7, 0.45, 0.1);
+        }
+    }
+
+    // Hotbar indicator: show selected slot at bottom-center
+    float hotbar_left = screen_center.x - 90.0;
+    if (pixel.y > 5.0 && pixel.y < 18.0 && pixel.x > hotbar_left && pixel.x < hotbar_left + 180.0) {
+        color = vec3(0.2, 0.2, 0.2);
+        // Highlight selected slot
+        float slot_x = hotbar_left + pc.selected_slot * 20.0;
+        if (pixel.x > slot_x && pixel.x < slot_x + 20.0) {
+            color = vec3(0.8, 0.8, 0.8);
+        }
+    }
 
     out_color = vec4(color, 1.0);
 }

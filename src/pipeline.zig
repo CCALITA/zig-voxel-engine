@@ -7,7 +7,9 @@ pub const PushConstants = extern struct {
     fog_color: [3]f32,
     fog_start: f32,
     fog_end: f32,
-    _padding: [3]f32 = .{ 0, 0, 0 },
+    health_fraction: f32 = 0.0,
+    hunger_fraction: f32 = 0.0,
+    selected_slot: f32 = 0.0,
 };
 
 pub fn create(

@@ -1108,6 +1108,11 @@ pub const Engine = struct {
         sky_color[1] = sky_color[1] * 0.8 + biome_tint[1] * 0.2;
         sky_color[2] = sky_color[2] * 0.8 + biome_tint[2] * 0.2;
 
+        // Pass HUD data to renderer for shader-based overlay
+        self.renderer.hud_health = @as(f32, @floatFromInt(self.player_stats.getHealthHearts())) / 10.0;
+        self.renderer.hud_hunger = @as(f32, @floatFromInt(self.player_stats.getHungerDrumsticks())) / 10.0;
+        self.renderer.hud_selected_slot = @floatFromInt(self.selected_slot);
+
         self.renderer.drawFrame(vp_arr, sky_color, fog_color) catch |err| {
             std.debug.print("Render error: {}\n", .{err});
         };

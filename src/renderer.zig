@@ -89,6 +89,11 @@ current_vp: [4][4]f32,
 current_sky_color: [3]f32,
 current_fog_color: [3]f32,
 
+// HUD data passed through push constants
+hud_health: f32 = 1.0,
+hud_hunger: f32 = 1.0,
+hud_selected_slot: f32 = 0.0,
+
 // Entity rendering: reusable unit cube for mob visualization
 entity_cube_buffer: vk.Buffer = .null_handle,
 entity_cube_memory: vk.DeviceMemory = .null_handle,
@@ -802,6 +807,9 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
                 .fog_color = self.current_fog_color,
                 .fog_start = 60.0,
                 .fog_end = 80.0,
+                .health_fraction = self.hud_health,
+                .hunger_fraction = self.hud_hunger,
+                .selected_slot = self.hud_selected_slot,
             };
             self.vkd.cmdPushConstants(
                 cmd,
