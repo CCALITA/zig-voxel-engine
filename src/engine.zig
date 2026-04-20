@@ -839,6 +839,30 @@ pub const Engine = struct {
                 });
             }
 
+            // Submit mob positions to renderer for entity drawing
+            self.renderer.clearEntityDraws();
+            for (self.mob_manager.entities.items) |mob| {
+                if (!mob.alive) continue;
+                const tex: u6 = switch (mob.entity_type) {
+                    .zombie => 2, // green (grass top color)
+                    .skeleton => 0, // gray (stone color)
+                    .creeper => 10, // dark green (leaves)
+                    .pig => 3, // grass side (pinkish)
+                    .cow => 1, // brown (dirt)
+                    .chicken => 6, // tan (sand)
+                    .sheep => 5, // light (planks)
+                    else => 4, // gray (cobblestone)
+                };
+                self.renderer.submitEntityDraw(.{
+                    .x = mob.x,
+                    .y = mob.y,
+                    .z = mob.z,
+                    .width = mob.width,
+                    .height = mob.height,
+                    .tex = tex,
+                });
+            }
+
             self.renderFrame(dt);
         }
 

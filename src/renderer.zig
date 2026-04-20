@@ -89,6 +89,25 @@ current_vp: [4][4]f32,
 current_sky_color: [3]f32,
 current_fog_color: [3]f32,
 
+// Entity rendering: reusable unit cube for mob visualization
+entity_cube_buffer: vk.Buffer = .null_handle,
+entity_cube_memory: vk.DeviceMemory = .null_handle,
+entity_cube_index_buffer: vk.Buffer = .null_handle,
+entity_cube_index_memory: vk.DeviceMemory = .null_handle,
+
+// Entity draw list (positions + colors submitted per frame)
+entity_draws: [128]EntityDraw = undefined,
+entity_draw_count: u32 = 0,
+
+pub const EntityDraw = struct {
+    x: f32,
+    y: f32,
+    z: f32,
+    width: f32,
+    height: f32,
+    tex: u6,
+};
+
 pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     var self: Self = undefined;
     self.allocator = allocator;
@@ -259,6 +278,17 @@ pub fn drawFrame(self: *Self, vp: [4][4]f32, sky_color: [3]f32, fog_color: [3]f3
 
 pub fn waitIdle(self: *Self) void {
     self.vkd.deviceWaitIdle(self.device) catch {};
+}
+
+pub fn submitEntityDraw(self: *Self, draw: EntityDraw) void {
+    if (self.entity_draw_count < 128) {
+        self.entity_draws[self.entity_draw_count] = draw;
+        self.entity_draw_count += 1;
+    }
+}
+
+pub fn clearEntityDraws(self: *Self) void {
+    self.entity_draw_count = 0;
 }
 
 // --- Private helpers ---
@@ -759,6 +789,43 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
 
             // Draw indexed
             self.vkd.cmdDrawIndexed(cmd, chunk_data.index_count, 1, 0, 0, 0);
+        }
+    }
+
+    // Draw entities as colored cubes using the same terrain pipeline
+    // Each entity reuses the first chunk's vertex buffer but with a per-entity model matrix
+    if (self.entity_draw_count > 0 and self.chunk_renders.items.len > 0) {
+        // Reuse the first chunk's vertex/index buffers as a source of cube geometry
+        // (a single block at origin is a 1x1x1 cube — we scale/translate via model matrix)
+        const first_chunk = self.chunk_renders.items[0];
+        const offsets_e = [_]vk.DeviceSize{0};
+        const vb_e = [_]vk.Buffer{first_chunk.vertex_buffer};
+        self.vkd.cmdBindVertexBuffers(cmd, 0, 1, &vb_e, &offsets_e);
+        self.vkd.cmdBindIndexBuffer(cmd, first_chunk.index_buffer, 0, .uint32);
+
+        var ei: u32 = 0;
+        while (ei < self.entity_draw_count) : (ei += 1) {
+            const ed = self.entity_draws[ei];
+            // Model matrix: translate to entity position
+            const model = translationMatrix(ed.x, ed.y, ed.z);
+            const mvp_e = mat4Mul(model, self.current_vp);
+            const push_e = pipeline_mod.PushConstants{
+                .mvp = mvp_e,
+                .fog_color = self.current_fog_color,
+                .fog_start = 60.0,
+                .fog_end = 80.0,
+            };
+            self.vkd.cmdPushConstants(
+                cmd,
+                self.terrain_pipeline_layout,
+                .{ .vertex_bit = true, .fragment_bit = true },
+                0,
+                @sizeOf(pipeline_mod.PushConstants),
+                @ptrCast(&push_e),
+            );
+            // Draw a small portion of the first chunk's geometry (first 36 indices = 6 faces of 1 block)
+            const indices_to_draw: u32 = @min(36, first_chunk.index_count);
+            self.vkd.cmdDrawIndexed(cmd, indices_to_draw, 1, 0, 0, 0);
         }
     }
 
