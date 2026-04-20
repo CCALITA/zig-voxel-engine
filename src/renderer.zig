@@ -99,6 +99,10 @@ entity_cube_index_memory: vk.DeviceMemory = .null_handle,
 entity_draws: [128]EntityDraw = undefined,
 entity_draw_count: u32 = 0,
 
+// Particle draw list (small colored cubes from block break effects)
+particle_draws: [256]ParticleDraw = undefined,
+particle_draw_count: u32 = 0,
+
 pub const EntityDraw = struct {
     x: f32,
     y: f32,
@@ -106,6 +110,16 @@ pub const EntityDraw = struct {
     width: f32,
     height: f32,
     tex: u6,
+};
+
+pub const ParticleDraw = struct {
+    x: f32,
+    y: f32,
+    z: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    size: f32,
 };
 
 pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
@@ -289,6 +303,17 @@ pub fn submitEntityDraw(self: *Self, draw: EntityDraw) void {
 
 pub fn clearEntityDraws(self: *Self) void {
     self.entity_draw_count = 0;
+}
+
+pub fn submitParticleDraw(self: *Self, draw: ParticleDraw) void {
+    if (self.particle_draw_count < 256) {
+        self.particle_draws[self.particle_draw_count] = draw;
+        self.particle_draw_count += 1;
+    }
+}
+
+pub fn clearParticleDraws(self: *Self) void {
+    self.particle_draw_count = 0;
 }
 
 // --- Private helpers ---
@@ -826,6 +851,40 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
             // Draw a small portion of the first chunk's geometry (first 36 indices = 6 faces of 1 block)
             const indices_to_draw: u32 = @min(36, first_chunk.index_count);
             self.vkd.cmdDrawIndexed(cmd, indices_to_draw, 1, 0, 0, 0);
+        }
+    }
+
+    // Draw particles as tiny cubes (block break effects)
+    if (self.particle_draw_count > 0 and self.chunk_renders.items.len > 0) {
+        const first_chunk_p = self.chunk_renders.items[0];
+        const offsets_p = [_]vk.DeviceSize{0};
+        const vb_p = [_]vk.Buffer{first_chunk_p.vertex_buffer};
+        self.vkd.cmdBindVertexBuffers(cmd, 0, 1, &vb_p, &offsets_p);
+        self.vkd.cmdBindIndexBuffer(cmd, first_chunk_p.index_buffer, 0, .uint32);
+
+        var pi: u32 = 0;
+        while (pi < self.particle_draw_count) : (pi += 1) {
+            const pd = self.particle_draws[pi];
+            // Scale particle down (0.1 block size) via model matrix offset
+            const model_p = translationMatrix(pd.x, pd.y, pd.z);
+            const mvp_p = mat4Mul(model_p, self.current_vp);
+            const push_p = pipeline_mod.PushConstants{
+                .mvp = mvp_p,
+                .fog_color = self.current_fog_color,
+                .fog_start = 60.0,
+                .fog_end = 80.0,
+            };
+            self.vkd.cmdPushConstants(
+                cmd,
+                self.terrain_pipeline_layout,
+                .{ .vertex_bit = true, .fragment_bit = true },
+                0,
+                @sizeOf(pipeline_mod.PushConstants),
+                @ptrCast(&push_p),
+            );
+            // Draw minimal geometry for particle (6 indices = 1 face)
+            const p_indices: u32 = @min(6, first_chunk_p.index_count);
+            self.vkd.cmdDrawIndexed(cmd, p_indices, 1, 0, 0, 0);
         }
     }
 

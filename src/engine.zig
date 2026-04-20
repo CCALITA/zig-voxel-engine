@@ -863,6 +863,51 @@ pub const Engine = struct {
                 });
             }
 
+            // Submit active particles to renderer
+            self.renderer.clearParticleDraws();
+            for (&self.particle_manager.particles) |*p| {
+                if (p.active) {
+                    self.renderer.submitParticleDraw(.{
+                        .x = p.x,
+                        .y = p.y,
+                        .z = p.z,
+                        .r = p.r,
+                        .g = p.g,
+                        .b = p.b,
+                        .size = p.size,
+                    });
+                }
+            }
+
+            // Submit projectile positions as small entities
+            for (&self.projectile_manager.pool) |*proj| {
+                if (proj.active) {
+                    self.renderer.submitEntityDraw(.{
+                        .x = proj.x,
+                        .y = proj.y,
+                        .z = proj.z,
+                        .width = 0.3,
+                        .height = 0.3,
+                        .tex = 8, // log color (brown) for arrows
+                    });
+                }
+            }
+
+            // Submit item drops as small cubes on the ground
+            for (self.drop_manager.drops.items) |drop| {
+                if (drop.active) {
+                    self.renderer.submitParticleDraw(.{
+                        .x = drop.x,
+                        .y = drop.y,
+                        .z = drop.z,
+                        .r = 1.0,
+                        .g = 1.0,
+                        .b = 1.0,
+                        .size = 0.3,
+                    });
+                }
+            }
+
             self.renderFrame(dt);
         }
 
