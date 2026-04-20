@@ -220,6 +220,7 @@ pub const Engine = struct {
     },
     show_debug: bool = false,
     last_f3_press: bool = false,
+    status_timer: f32 = 0.0,
 
     // Copper oxidation random-tick timer and frame counter for hash variation
 
@@ -589,92 +590,6 @@ pub const Engine = struct {
             self.last_f_press = f_pressed;
             self.fishing.update(dt);
 
-            // Taming: when right-clicking near a passive mob with taming item
-            // (simplified: check nearest passive mob within 3 blocks on right-click)
-            if (self.last_right_click) {
-                const held_item = self.inventory.getSlot(self.selected_slot).item;
-                for (self.mob_manager.entities.items) |*mob| {
-                    if (!mob.alive) continue;
-                    if (mob.entity_type.isHostile()) continue;
-                    const mdist = mob.distanceToPoint(self.player_x, self.player_y, self.player_z);
-                    if (mdist < 3.0) {
-                        // Check if held item can tame this mob type
-                        const tamable_type: ?taming_mod.TamableType = switch (mob.entity_type) {
-                            .pig => null, // pigs can't be tamed
-                            .cow => null,
-                            .chicken => null,
-                            .sheep => null,
-                            else => null,
-                        };
-                        if (tamable_type) |tt| {
-                            var tstate = taming_mod.TamingState.init(tt);
-                            if (tstate.attemptTame(held_item, 0)) {
-                                self.tamed_count += 1;
-                                // Advancement: tame_animal
-                                self.advancements.checkCriteria(.tame_animal, @intFromEnum(mob.entity_type));
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-
-            // Advancements: track dimension entry
-            if (self.current_dimension == .nether) {
-                self.advancements.checkCriteria(.enter_dimension, 1);
-            } else if (self.current_dimension == .the_end) {
-                self.advancements.checkCriteria(.enter_dimension, 2);
-            }
-
-            // Advancements: track food eating
-            if (self.eating_progress > 0 and self.eating_progress >= 1.6) {
-                self.advancements.checkCriteria(.eat_food, 0);
-            }
-
-            // Cooking: smoker/blast furnace would update here alongside regular furnaces
-            // (cooking_mod provides SmokerState/BlastFurnaceState with 2x speed)
-            _ = cooking_mod; // acknowledge import — smokers/blast furnaces use same pattern as furnaces
-
-            // Storage: ender chest provides shared global inventory
-            // Accessed on right-click of ender chest block via storage_mod.EnderChest
-            _ = storage_mod;
-
-            // Crafting stations: grindstone/stonecutter/loom/smithing used on right-click
-            // (crafting_stations_mod methods called in handleBlockInteraction for these blocks)
-            _ = crafting_stations_mod;
-
-            // Banners: pattern data tracked on banner blocks
-            _ = banners_mod;
-
-            // Music: jukebox/note block state updates
-            _ = music_mod;
-
-            // Map: map data updates when carried
-            _ = map_item_mod;
-
-            // Automation: hopper/dropper/dispenser tick per frame
-            _ = automation_mod;
-
-            // Command blocks: execute on redstone pulse
-            _ = command_block_mod;
-
-            // Piston: extend/retract on redstone
-            _ = piston_mod;
-
-            // Anvil/beacon/brewing: interact on right-click
-            _ = anvil_mod;
-            _ = beacon_mod;
-            _ = brewing_stand_mod;
-
-            // Ender items: pearl teleport, eye direction
-            _ = ender_items_mod;
-
-            // Decorations: painting/itemframe/sign placement
-            _ = decorations_mod;
-
-            // Mob variants: iron golem, snow golem, wither, guardian, phantom data
-            _ = mob_variants_mod;
-
             // Chat/commands: T opens chat, Escape closes, Enter executes
             self.handleChatInput();
 
@@ -893,6 +808,35 @@ pub const Engine = struct {
             // Update F3 debug info (only when overlay is visible)
             if (self.show_debug) {
                 self.updateDebugInfo(dt);
+            }
+
+            // Periodic console status (every 5 seconds) — since no HUD rendering yet
+            self.status_timer += dt;
+            if (self.status_timer >= 5.0) {
+                self.status_timer = 0.0;
+                const hearts = self.player_stats.getHealthHearts();
+                const drumsticks = self.player_stats.getHungerDrumsticks();
+                const mobs_alive = self.mob_manager.count();
+                const chunks_loaded = self.chunks.count();
+                std.debug.print(
+                    \\[STATUS] Pos({d:.1},{d:.1},{d:.1}) HP:{}/10 Food:{}/10 Mobs:{} Chunks:{} Dim:{s} Time:{} Weather:{s} XP:Lv{}
+                    \\
+                , .{
+                    self.player_x,                    self.player_y,
+                    self.player_z,
+                    hearts,
+                    drumsticks,
+                    mobs_alive,
+                    chunks_loaded,
+                    @as([]const u8, switch (self.current_dimension) {
+                        .overworld => "OW",
+                        .nether => "Nether",
+                        .the_end => "End",
+                    }),
+                    self.game_time.tick,
+                    @as([]const u8, if (self.weather.isRaining()) "Rain" else if (self.weather.isThundering()) "Thunder" else "Clear"),
+                    self.xp.getLevel(),
+                });
             }
 
             self.renderFrame(dt);
@@ -1423,6 +1367,25 @@ pub const Engine = struct {
                     self.interactFurnace(hit.bx, hit.by, hit.bz);
                 } else if (target_bid == ENCHANTING_TABLE_BLOCK_ID) {
                     self.interactEnchantingTable();
+                } else if (target_bid == block.ANVIL) {
+                    // Anvil: repair/rename/combine — log to console
+                    std.debug.print("[Anvil] Opened anvil at ({},{},{})\n", .{ hit.bx, hit.by, hit.bz });
+                } else if (target_bid == block.BEACON) {
+                    // Beacon: check pyramid and apply effect
+                    var beacon_state = beacon_mod.BeaconState.init();
+                    beacon_state.checkPyramid(1); // simplified — would scan blocks
+                    std.debug.print("[Beacon] Tier {}, range {} blocks\n", .{ beacon_state.pyramid_tier, beacon_state.getRange() });
+                } else if (target_bid == block.BREWING_STAND) {
+                    // Brewing stand: add ingredient from hotbar
+                    std.debug.print("[Brewing] Opened brewing stand at ({},{},{})\n", .{ hit.bx, hit.by, hit.bz });
+                } else if (target_bid == block.JUKEBOX) {
+                    // Jukebox: insert/eject disc
+                    std.debug.print("[Jukebox] Interacted at ({},{},{})\n", .{ hit.bx, hit.by, hit.bz });
+                } else if (target_bid == block.NOTE_BLOCK) {
+                    // Note block: play note
+                    var nblock = music_mod.NoteBlockState.init();
+                    const note = nblock.play();
+                    std.debug.print("[NoteBlock] Pitch {}, instrument {}\n", .{ note.pitch, @intFromEnum(note.instrument) });
                 } else {
                     self.renderer.waitIdle();
                     self.placeBlock(hit.adjacent_x, hit.adjacent_y, hit.adjacent_z);
