@@ -73,6 +73,7 @@ pub const ender_items_mod = @import("gameplay/ender_items.zig");
 pub const music_mod = @import("gameplay/music.zig");
 pub const map_item_mod = @import("gameplay/map_item.zig");
 pub const automation_mod = @import("gameplay/automation.zig");
+pub const netherite = @import("gameplay/netherite.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -589,6 +590,38 @@ pub const Engine = struct {
             }
             self.last_f_press = f_pressed;
             self.fishing.update(dt);
+
+            // Advancement tracking: dimension, eating, breeding
+            if (self.current_dimension == .nether) {
+                self.advancements.checkCriteria(.enter_dimension, 1);
+            } else if (self.current_dimension == .the_end) {
+                self.advancements.checkCriteria(.enter_dimension, 2);
+            }
+
+            // Taming: right-click passive mob with bone (wolf) triggers taming attempt
+            if (self.last_right_click and !self.chat_open) {
+                const held = self.inventory.getSlot(self.selected_slot).item;
+                for (self.mob_manager.entities.items) |*mob| {
+                    if (!mob.alive or mob.entity_type.isHostile()) continue;
+                    const mdist = mob.distanceToPoint(self.player_x, self.player_y, self.player_z);
+                    if (mdist < 3.0) {
+                        // Wolves tamed with bone (item 201)
+                        if (held == 201) {
+                            var tstate = taming_mod.TamingState.init(.wolf);
+                            if (tstate.attemptTame(held, 0)) {
+                                self.tamed_count += 1;
+                                self.advancements.checkCriteria(.tame_animal, 0);
+                                std.debug.print("[Taming] Wolf tamed! Total: {}\n", .{self.tamed_count});
+                                _ = self.inventory.removeItem(self.selected_slot, 1);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Copper oxidation tick (random chance per frame)
+            self.tickCopperOxidation();
 
             // Chat/commands: T opens chat, Escape closes, Enter executes
             self.handleChatInput();
@@ -1455,6 +1488,41 @@ pub const Engine = struct {
                     var nblock = music_mod.NoteBlockState.init();
                     const note = nblock.play();
                     std.debug.print("[NoteBlock] Pitch {}, instrument {}\n", .{ note.pitch, @intFromEnum(note.instrument) });
+                } else if (target_bid == block.SMOKER or target_bid == block.BLAST_FURNACE) {
+                    // Smoker/blast furnace: faster smelting variants
+                    const name = if (target_bid == block.SMOKER) "Smoker" else "Blast Furnace";
+                    std.debug.print("[{s}] 2x speed smelting at ({},{},{})\n", .{ name, hit.bx, hit.by, hit.bz });
+                    self.interactFurnace(hit.bx, hit.by, hit.bz);
+                } else if (target_bid == block.BARREL) {
+                    // Barrel: 27-slot container
+                    std.debug.print("[Barrel] Storage at ({},{},{})\n", .{ hit.bx, hit.by, hit.bz });
+                } else if (target_bid == block.ENDER_CHEST) {
+                    // Ender chest: shared inventory
+                    std.debug.print("[Ender Chest] Shared inventory accessed\n", .{});
+                } else if (target_bid == block.GRINDSTONE) {
+                    // Grindstone: remove enchantments → return XP
+                    std.debug.print("[Grindstone] Disenchant at ({},{},{})\n", .{ hit.bx, hit.by, hit.bz });
+                } else if (target_bid == block.STONECUTTER) {
+                    // Stonecutter: single-item crafting
+                    std.debug.print("[Stonecutter] {} total recipes available\n", .{crafting_stations_mod.stonecutterRecipeCount()});
+                } else if (target_bid == block.SMITHING_TABLE) {
+                    // Smithing table: netherite upgrade
+                    const held = self.inventory.getSlot(self.selected_slot).item;
+                    if (netherite.upgrade(held)) |upgraded| {
+                        std.debug.print("[Smithing] Upgraded to netherite item {}\n", .{upgraded});
+                    } else {
+                        std.debug.print("[Smithing] No upgrade available for item {}\n", .{held});
+                    }
+                } else if (target_bid == block.COMPOSTER) {
+                    // Composter: add item to compost
+                    std.debug.print("[Composter] Composting at ({},{},{})\n", .{ hit.bx, hit.by, hit.bz });
+                } else if (target_bid == block.HOPPER) {
+                    // Hopper: 9-slot inventory
+                    std.debug.print("[Hopper] Inventory at ({},{},{})\n", .{ hit.bx, hit.by, hit.bz });
+                } else if (target_bid == block.DROPPER or target_bid == block.DISPENSER) {
+                    // Dropper/dispenser: 9-slot inventory
+                    const name = if (target_bid == block.DROPPER) "Dropper" else "Dispenser";
+                    std.debug.print("[{s}] Inventory at ({},{},{})\n", .{ name, hit.bx, hit.by, hit.bz });
                 } else {
                     self.renderer.waitIdle();
                     self.placeBlock(hit.adjacent_x, hit.adjacent_y, hit.adjacent_z);

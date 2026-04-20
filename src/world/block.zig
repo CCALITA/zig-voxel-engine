@@ -143,6 +143,19 @@ pub const EXPOSED_COPPER: BlockId = 96;
 pub const WEATHERED_COPPER: BlockId = 97;
 pub const OXIDIZED_COPPER: BlockId = 98;
 
+// -- Workstation / interactive blocks (Batch 14+) --
+pub const SMOKER: BlockId = 99;
+pub const BLAST_FURNACE: BlockId = 100;
+pub const BARREL: BlockId = 101;
+pub const GRINDSTONE: BlockId = 102;
+pub const STONECUTTER: BlockId = 103;
+pub const SMITHING_TABLE: BlockId = 104;
+pub const LOOM_BLOCK: BlockId = 105;
+pub const CARTOGRAPHY_TABLE: BlockId = 106;
+pub const COMPOSTER: BlockId = 107;
+pub const LECTERN: BlockId = 108;
+pub const ENDER_CHEST: BlockId = 109;
+
 // Texture atlas indices (placeholder -- will map to real textures later)
 const T_STONE: u16 = 0;
 const T_DIRT: u16 = 1;
