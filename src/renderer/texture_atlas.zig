@@ -166,6 +166,11 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         37 => genLava(x, y, h),
         96...111 => genWool(x, y, h, base),
         112...115 => genTerracotta(x, y, h, base),
+        116...119 => genConcrete(h, base),
+        120 => genCopperBlock(x, y, h),
+        121 => genExposedCopper(h),
+        122 => genWeatheredCopper(h),
+        123 => genOxidizedCopper(x, y, h),
         else => mixColor(base, if (fine_i32 > noise_i32) fine_i32 else noise_i32),
     };
 }
@@ -333,15 +338,44 @@ fn genLava(_: u32, y: u32, h: u32) Pixel {
     return .{ .r = clampU8(192 + n), .g = clampU8(64 + n), .b = clampU8(51 + @divTrunc(n, 2)), .a = 255 };
 }
 
-fn genWool(_: u32, _: u32, h: u32, base: Rgb) Pixel {
-    _ = h;
-    return mixColor(base, 0);
+fn genWool(x: u32, y: u32, _: u32, base: Rgb) Pixel {
+    const weave: i32 = if (x % 2 != y % 2) 5 else -5;
+    return mixColor(base, weave);
 }
 
 fn genTerracotta(_: u32, y: u32, h: u32, base: Rgb) Pixel {
     const layer = (y + (h >> 8) % 3) % 6;
     const n: i32 = if (layer < 3) 8 else -8;
     return mixColor(base, n);
+}
+
+fn genConcrete(h: u32, base: Rgb) Pixel {
+    return mixColor(base, noise16(h));
+}
+
+fn genCopperBlock(_: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    const sheen: i32 = if (y % 5 == 0) 15 else 0;
+    if (h % 20 == 0) return px(clampU8(60 + n), clampU8(140 + n), clampU8(90 + n));
+    return px(clampU8(192 + n + sheen), clampU8(115 + n + sheen), clampU8(71 + n + sheen));
+}
+
+fn genExposedCopper(h: u32) Pixel {
+    const n = noise16(h);
+    if (h % 5 == 0) return px(clampU8(60 + n), clampU8(140 + n), clampU8(90 + n));
+    return px(clampU8(166 + n), clampU8(128 + n), clampU8(90 + n));
+}
+
+fn genWeatheredCopper(h: u32) Pixel {
+    const n = noise16(h);
+    if (h % 10 < 3) return px(clampU8(166 + n), clampU8(128 + n), clampU8(90 + n));
+    return px(clampU8(115 + n), clampU8(150 + n), clampU8(115 + n));
+}
+
+fn genOxidizedCopper(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x % 5 == 0 or y % 5 == 0) return px(clampU8(50 + n), clampU8(130 + n), clampU8(110 + n));
+    return px(clampU8(76 + n), clampU8(166 + n), clampU8(140 + n));
 }
 
 pub fn generateAtlas(allocator: std.mem.Allocator) ![]Pixel {
