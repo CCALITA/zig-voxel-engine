@@ -164,6 +164,15 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         34 => genGlowstone(x, y, h),
         35 => genNetherrack(x, y, h),
         37 => genLava(x, y, h),
+        38 => genRedstoneWire(x, y, h),
+        39 => genRedstoneTorch(x, y, h),
+        40 => genLever(x, y, h),
+        41 => genButton(x, y, h),
+        44 => genRepeater(x, y, h),
+        80 => genRail(x, y, h),
+        81 => genPoweredRail(x, y, h),
+        82 => genDetectorRail(x, y, h),
+        83 => genActivatorRail(x, y, h),
         96...111 => genWool(x, y, h, base),
         112...115 => genTerracotta(x, y, h, base),
         else => mixColor(base, if (fine_i32 > noise_i32) fine_i32 else noise_i32),
@@ -342,6 +351,126 @@ fn genTerracotta(_: u32, y: u32, h: u32, base: Rgb) Pixel {
     const layer = (y + (h >> 8) % 3) % 6;
     const n: i32 = if (layer < 3) 8 else -8;
     return mixColor(base, n);
+}
+
+fn stoneBase(h: u32) Pixel {
+    const sn = noise32(h);
+    const sv = clampU8(128 + sn);
+    return px(sv, sv, sv);
+}
+
+fn ironRail(n: i32) Pixel {
+    return px(clampU8(80 + n), clampU8(80 + n), clampU8(85 + n));
+}
+
+fn railTie(x: u32, y: u32, n: i32) ?Pixel {
+    const is_tie_row = (y >= 2 and y <= 3) or (y >= 5 and y <= 6) or (y >= 8 and y <= 9) or (y >= 11 and y <= 12) or (y >= 14 and y <= 15);
+    if (is_tie_row and x >= 2 and x <= 13) {
+        return px(clampU8(130 + n), clampU8(90 + n), clampU8(50 + n));
+    }
+    return null;
+}
+
+fn railGravel(h: u32) Pixel {
+    const sn = noise32(h);
+    return px(clampU8(110 + sn), clampU8(105 + sn), clampU8(95 + sn));
+}
+
+fn genRedstoneWire(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if ((x == 7 or x == 8) or (y == 7 or y == 8)) {
+        return px(clampU8(200 + n), clampU8(20 + @divTrunc(n, 2)), clampU8(20 + @divTrunc(n, 2)));
+    }
+    // Red glow near the cross
+    if ((x >= 6 and x <= 9) or (y >= 6 and y <= 9)) {
+        const v = clampU8(128 + n);
+        return px(clampU8(@as(i32, v) + 30), v, v);
+    }
+    return stoneBase(h);
+}
+
+fn genRedstoneTorch(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (y <= 3 and x >= 6 and x <= 9) {
+        if (y <= 1) return px(255, clampU8(200 + n), clampU8(60 + n));
+        return px(clampU8(220 + n), clampU8(50 + n), clampU8(20 + n));
+    }
+    if ((x == 7 or x == 8) and y >= 4 and y <= 10) {
+        return px(clampU8(100 + n), clampU8(70 + n), clampU8(35 + n));
+    }
+    return stoneBase(h);
+}
+
+fn genLever(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (y == 10 and (x == 7 or x == 8)) {
+        return px(clampU8(180 + n), clampU8(180 + n), clampU8(190 + n));
+    }
+    // Diagonal lever arm: 2px wide line from bottom-left to upper-right
+    if (y >= 4 and y <= 14) {
+        const target_x: i32 = @as(i32, 14) - @as(i32, @intCast(y)) + 1;
+        const dx = @as(i32, @intCast(x)) - target_x;
+        if (dx >= 0 and dx <= 1) {
+            return px(clampU8(120 + n), clampU8(85 + n), clampU8(45 + n));
+        }
+    }
+    return stoneBase(h);
+}
+
+fn genButton(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x >= 5 and x <= 10 and y >= 5 and y <= 8) {
+        if (y == 8) return px(clampU8(110 + n), clampU8(110 + n), clampU8(110 + n));
+        return px(clampU8(170 + n), clampU8(170 + n), clampU8(170 + n));
+    }
+    return stoneBase(h);
+}
+
+fn genRepeater(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Torch dots at (4,6) and (11,6)
+    if (y == 6 and (x == 4 or x == 11)) {
+        return px(clampU8(220 + n), clampU8(30 + @divTrunc(n, 2)), clampU8(30 + @divTrunc(n, 2)));
+    }
+    // Redstone line connecting torches
+    if (y == 6 and x >= 4 and x <= 11) {
+        return px(clampU8(120 + n), clampU8(15 + @divTrunc(n, 4)), clampU8(15 + @divTrunc(n, 4)));
+    }
+    const sv = clampU8(140 + n);
+    return px(sv, sv, clampU8(@as(i32, sv) - 5));
+}
+
+fn genRail(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x == 3 or x == 12) return ironRail(n);
+    if (railTie(x, y, n)) |tie| return tie;
+    return railGravel(h);
+}
+
+fn genPoweredRail(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x == 3 or x == 12) return px(clampU8(200 + n), clampU8(170 + n), clampU8(50 + n));
+    if (x == 7 or x == 8) return px(clampU8(200 + n), clampU8(20 + @divTrunc(n, 2)), clampU8(20 + @divTrunc(n, 2)));
+    if (railTie(x, y, n)) |tie| return tie;
+    return railGravel(h);
+}
+
+fn genDetectorRail(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x == 3 or x == 12) return ironRail(n);
+    if (x >= 4 and x <= 11 and (y == 7 or y == 8)) {
+        return px(clampU8(160 + n), clampU8(30 + @divTrunc(n, 2)), clampU8(30 + @divTrunc(n, 2)));
+    }
+    if (railTie(x, y, n)) |tie| return tie;
+    return railGravel(h);
+}
+
+fn genActivatorRail(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x == 3 or x == 12) return ironRail(n);
+    if (x == 7 or x == 8) return px(clampU8(220 + n), clampU8(30 + @divTrunc(n, 2)), clampU8(30 + @divTrunc(n, 2)));
+    if (railTie(x, y, n)) |tie| return tie;
+    return railGravel(h);
 }
 
 pub fn generateAtlas(allocator: std.mem.Allocator) ![]Pixel {
