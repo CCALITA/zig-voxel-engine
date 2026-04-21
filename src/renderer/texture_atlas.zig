@@ -51,6 +51,14 @@ fn init_base_colors() [256]Rgb {
     c[35] = .{ 115, 51, 51 }; // netherrack
     c[36] = .{ 90, 71, 56 }; // soul sand
     c[37] = .{ 192, 64, 51 }; // lava
+    c[54] = .{ 217, 210, 166 }; // end stone
+    c[57] = .{ 200, 240, 255 }; // beacon
+    c[58] = .{ 80, 80, 80 }; // brewing stand
+    c[74] = .{ 30, 10, 40 }; // enchanting table top
+    c[75] = .{ 25, 15, 35 }; // enchanting table side
+    c[77] = .{ 102, 140, 76 }; // end portal frame side
+    c[78] = .{ 90, 130, 70 }; // end portal frame top
+    c[79] = .{ 5, 5, 10 }; // end portal
     // Wool colors (96-111)
     c[96] = .{ 242, 242, 242 }; // white
     c[97] = .{ 230, 140, 38 }; // orange
@@ -163,7 +171,16 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         26 => genSnow(x, y, h),
         34 => genGlowstone(x, y, h),
         35 => genNetherrack(x, y, h),
+        36 => genSoulSand(x, y, h),
         37 => genLava(x, y, h),
+        54 => genEndStone(x, y, h),
+        57 => genBeacon(x, y),
+        58 => genBrewingStand(x, y, h),
+        74 => genEnchantingTableTop(x, y, h),
+        75 => genEnchantingTableSide(x, y, h),
+        77 => genEndPortalFrameSide(x, y, h),
+        78 => genEndPortalFrameTop(x, y, h),
+        79 => genEndPortal(x, y, h),
         96...111 => genWool(x, y, h, base),
         112...115 => genTerracotta(x, y, h, base),
         else => mixColor(base, if (fine_i32 > noise_i32) fine_i32 else noise_i32),
@@ -331,6 +348,91 @@ fn genLava(_: u32, y: u32, h: u32) Pixel {
     if (flow == 0) return px(255, clampU8(180 + n), 50);
     if (flow == 1) return px(255, clampU8(120 + n), 30);
     return .{ .r = clampU8(192 + n), .g = clampU8(64 + n), .b = clampU8(51 + @divTrunc(n, 2)), .a = 255 };
+}
+
+fn genSoulSand(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Face-like dark hollows: 2-3 circular spots
+    const spots = [_][2]i32{ .{ 4, 6 }, .{ 11, 5 }, .{ 7, 12 } };
+    for (spots) |s| {
+        const dx = @as(i32, @intCast(x)) - s[0];
+        const dy = @as(i32, @intCast(y)) - s[1];
+        if (dx * dx + dy * dy < 16) return px(40, 30, 25);
+    }
+    return .{ .r = clampU8(90 + n), .g = clampU8(71 + n), .b = clampU8(56 + n), .a = 255 };
+}
+
+fn genEndStone(_: u32, _: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if ((h >> 5) % 6 == 0) return .{ .r = clampU8(180 + n), .g = clampU8(170 + n), .b = clampU8(130 + n), .a = 255 };
+    return .{ .r = clampU8(217 + n), .g = clampU8(210 + n), .b = clampU8(166 + n), .a = 255 };
+}
+
+fn genBeacon(x: u32, y: u32) Pixel {
+    const dx = @as(i32, @intCast(x)) - 7;
+    const dy = @as(i32, @intCast(y)) - 7;
+    const dist_sq: u32 = @intCast(dx * dx + dy * dy);
+    if (dist_sq < 16) return px(255, 255, 255);
+    if (dist_sq < 36) return px(200, 240, 255);
+    return .{ .r = 150, .g = 210, .b = 230, .a = 180 };
+}
+
+fn genBrewingStand(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Stone base at bottom
+    if (y >= 12) return px(clampU8(80 + n), clampU8(80 + n), clampU8(80 + n));
+    // Bottle silhouette in center
+    if (x >= 6 and x <= 9 and y >= 3 and y <= 11) return px(clampU8(160 + n), clampU8(140 + n), clampU8(120 + n));
+    // Bottle bulb
+    if (x >= 5 and x <= 10 and y >= 7 and y <= 10) return px(clampU8(150 + n), clampU8(130 + n), clampU8(110 + n));
+    return px(clampU8(50 + n), clampU8(50 + n), clampU8(50 + n));
+}
+
+fn genEnchantingTableTop(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Glowing symbol lines
+    if (y == 4 and x >= 3 and x <= 12) return px(200, 50, 220);
+    if (y == 11 and x >= 3 and x <= 12) return px(200, 50, 220);
+    if (x == y and x >= 2 and x <= 13) return px(180, 40, 200);
+    if (x + y == 15 and x >= 2 and x <= 13) return px(180, 40, 200);
+    return .{ .r = clampU8(30 + @divTrunc(n, 2)), .g = clampU8(10 + @divTrunc(n, 2)), .b = clampU8(40 + @divTrunc(n, 2)), .a = 255 };
+}
+
+fn genEnchantingTableSide(_: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (y == 0 or y == 15) return px(200, 170, 50);
+    return .{ .r = clampU8(25 + @divTrunc(n, 2)), .g = clampU8(15 + @divTrunc(n, 2)), .b = clampU8(35 + @divTrunc(n, 2)), .a = 255 };
+}
+
+fn genEndPortalFrameSide(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Eye socket: dark circle at center with green iris
+    const dx = @as(i32, @intCast(x)) - 7;
+    const dy = @as(i32, @intCast(y)) - 7;
+    const dist_sq: u32 = @intCast(dx * dx + dy * dy);
+    if (dist_sq < 4) return px(50, 200, 50);
+    if (dist_sq < 16) return px(20, 20, 20);
+    return .{ .r = clampU8(102 + n), .g = clampU8(140 + n), .b = clampU8(76 + n), .a = 255 };
+}
+
+fn genEndPortalFrameTop(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Darker border, lighter center
+    if (x <= 2 or x >= 13 or y <= 2 or y >= 13) return .{ .r = clampU8(60 + n), .g = clampU8(90 + n), .b = clampU8(50 + n), .a = 255 };
+    if (x <= 4 or x >= 11 or y <= 4 or y >= 11) return .{ .r = clampU8(80 + n), .g = clampU8(120 + n), .b = clampU8(65 + n), .a = 255 };
+    return .{ .r = clampU8(120 + n), .g = clampU8(170 + n), .b = clampU8(100 + n), .a = 255 };
+}
+
+fn genEndPortal(_: u32, _: u32, h: u32) Pixel {
+    // Scattered star dots at ~5% density
+    if ((h >> 3) % 20 == 0) {
+        return switch ((h >> 7) % 3) {
+            0 => px(100, 220, 255),
+            1 => px(180, 100, 255),
+            else => px(240, 240, 255),
+        };
+    }
+    return px(5, 5, 10);
 }
 
 fn genWool(_: u32, _: u32, h: u32, base: Rgb) Pixel {
