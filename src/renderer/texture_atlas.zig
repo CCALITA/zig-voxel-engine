@@ -164,6 +164,11 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         34 => genGlowstone(x, y, h),
         35 => genNetherrack(x, y, h),
         37 => genLava(x, y, h),
+        48 => genBedHead(x, y, h),
+        49 => genBedFoot(x, y, h),
+        59 => genJukeboxSide(x, y, h),
+        60 => genJukeboxTop(x, y, h),
+        61 => genNoteBlock(x, y, h),
         96...111 => genWool(x, y, h, base),
         112...115 => genTerracotta(x, y, h, base),
         else => mixColor(base, if (fine_i32 > noise_i32) fine_i32 else noise_i32),
@@ -331,6 +336,49 @@ fn genLava(_: u32, y: u32, h: u32) Pixel {
     if (flow == 0) return px(255, clampU8(180 + n), 50);
     if (flow == 1) return px(255, clampU8(120 + n), 30);
     return .{ .r = clampU8(192 + n), .g = clampU8(64 + n), .b = clampU8(51 + @divTrunc(n, 2)), .a = 255 };
+}
+
+fn genBedHead(_: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (y == 15) return px(clampU8(80 + n), clampU8(50 + n), clampU8(30 + n));
+    if (y < 3) return px(clampU8(200 + n), clampU8(180 + n), clampU8(170 + n));
+    if (y == 5 or y == 10) return px(clampU8(150 + n), clampU8(35 + n), clampU8(35 + n));
+    return px(clampU8(180 + n), clampU8(50 + n), clampU8(50 + n));
+}
+
+fn genBedFoot(_: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (y == 15) return px(clampU8(80 + n), clampU8(50 + n), clampU8(30 + n));
+    if (y == 4 or y == 11) return px(clampU8(145 + n), clampU8(32 + n), clampU8(32 + n));
+    return px(clampU8(170 + n), clampU8(45 + n), clampU8(45 + n));
+}
+
+fn genJukeboxSide(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (y == 0 or y == 15) return px(clampU8(100 + n), clampU8(65 + n), clampU8(30 + n));
+    if (x == 0 or x == 5 or x == 10 or x == 15) return px(clampU8(95 + n), clampU8(60 + n), clampU8(28 + n));
+    return px(clampU8(128 + n), clampU8(90 + n), clampU8(51 + n));
+}
+
+fn genJukeboxTop(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    const dx = @as(i32, @intCast(x)) - 7;
+    const dy = @as(i32, @intCast(y)) - 7;
+    const dist_sq = dx * dx + dy * dy;
+    if (dist_sq <= 9) return px(clampU8(30 + n), clampU8(30 + n), clampU8(30 + n));
+    if (dist_sq <= 20) return px(clampU8(155 + n), clampU8(115 + n), clampU8(70 + n));
+    return px(clampU8(128 + n), clampU8(90 + n), clampU8(51 + n));
+}
+
+fn genNoteBlock(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Note head: oval at y=7, x=6-8
+    if (y >= 6 and y <= 8 and x >= 6 and x <= 8) return px(clampU8(160 + n), clampU8(120 + n), clampU8(75 + n));
+    // Note stem: vertical line at x=9, y=3-7
+    if (x == 9 and y >= 3 and y <= 7) return px(clampU8(160 + n), clampU8(120 + n), clampU8(75 + n));
+    // Panel lines like jukebox side
+    if (x == 0 or x == 5 or x == 10 or x == 15) return px(clampU8(95 + n), clampU8(60 + n), clampU8(28 + n));
+    return px(clampU8(128 + n), clampU8(90 + n), clampU8(51 + n));
 }
 
 fn genWool(_: u32, _: u32, h: u32, base: Rgb) Pixel {
