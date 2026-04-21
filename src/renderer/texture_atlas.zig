@@ -161,9 +161,26 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         20 => genObsidian(x, y, h),
         25 => genIce(x, y, h),
         26 => genSnow(x, y, h),
+        30 => genPumpkinSide(x, y, h),
+        31 => genPumpkinTop(x, y, h),
+        32 => genMelonSide(x, y, h),
         34 => genGlowstone(x, y, h),
         35 => genNetherrack(x, y, h),
         37 => genLava(x, y, h),
+        47 => genDoor(x, y, h),
+        50 => genLadder(x, y, h),
+        53 => genTrapdoor(x, y, h),
+        84 => genFarmlandTop(x, y, h),
+        85 => genFarmlandSide(x, y, h),
+        86 => genWheat(x, y, h),
+        87 => genCarrots(x, y, h),
+        88 => genPotatoes(x, y, h),
+        89 => genMelonSide(x, y, h),
+        91 => genJackOLanternFront(x, y, h),
+        92 => genPumpkinSide(x, y, h),
+        93 => genPumpkinTop(x, y, h),
+        94 => genHayBaleSide(x, y, h),
+        95 => genHayBaleTop(x, y, h),
         96...111 => genWool(x, y, h, base),
         112...115 => genTerracotta(x, y, h, base),
         else => mixColor(base, if (fine_i32 > noise_i32) fine_i32 else noise_i32),
@@ -331,6 +348,171 @@ fn genLava(_: u32, y: u32, h: u32) Pixel {
     if (flow == 0) return px(255, clampU8(180 + n), 50);
     if (flow == 1) return px(255, clampU8(120 + n), 30);
     return .{ .r = clampU8(192 + n), .g = clampU8(64 + n), .b = clampU8(51 + @divTrunc(n, 2)), .a = 255 };
+}
+
+fn genDoor(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x == 12 and y == 7) return px(200, 180, 50);
+    if (y >= 1 and y <= 6 and x >= 2 and x <= 13) {
+        if (x == 2 or x == 13 or y == 1 or y == 6)
+            return px(clampU8(100 + n), clampU8(70 + n), clampU8(35 + n));
+        return px(clampU8(120 + n), clampU8(85 + n), clampU8(45 + n));
+    }
+    if (y >= 9 and y <= 14 and x >= 2 and x <= 13) {
+        if (x == 2 or x == 13 or y == 9 or y == 14)
+            return px(clampU8(100 + n), clampU8(70 + n), clampU8(35 + n));
+        return px(clampU8(120 + n), clampU8(85 + n), clampU8(45 + n));
+    }
+    return px(clampU8(160 + n), clampU8(120 + n), clampU8(65 + n));
+}
+
+fn genLadder(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Vertical rails
+    if (x == 2 or x == 13)
+        return px(clampU8(140 + n), clampU8(100 + n), clampU8(50 + n));
+    // Horizontal rungs (2px high at y=2-3, 6-7, 10-11, 14-15)
+    if ((y >= 2 and y <= 3) or (y >= 6 and y <= 7) or (y >= 10 and y <= 11) or (y >= 14 and y <= 15)) {
+        if (x >= 2 and x <= 13)
+            return px(clampU8(140 + n), clampU8(100 + n), clampU8(50 + n));
+    }
+    return .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+}
+
+fn genTrapdoor(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Iron hinge marks at corners
+    if ((x <= 1 and y <= 1) or (x >= 14 and y <= 1) or (x <= 1 and y >= 14) or (x >= 14 and y >= 14))
+        return px(clampU8(80 + n), clampU8(80 + n), clampU8(80 + n));
+    // Cross brace diagonals
+    if (x == y or x == 15 - y)
+        return px(clampU8(110 + n), clampU8(75 + n), clampU8(35 + n));
+    // Horizontal grain planks
+    const band = (y +% (h >> 8) % 2) % 5;
+    if (band == 0) return px(clampU8(130 + n), clampU8(90 + n), clampU8(45 + n));
+    return px(clampU8(150 + n), clampU8(110 + n), clampU8(55 + n));
+}
+
+fn genFarmlandTop(x: u32, _: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Furrow lines
+    if (x == 0 or x == 4 or x == 8 or x == 12)
+        return px(clampU8(70 + n), clampU8(45 + n), clampU8(15 + n));
+    // Moist spots
+    if ((h >> 5) % 8 == 0)
+        return px(clampU8(75 + n), clampU8(48 + n), clampU8(18 + n));
+    return px(clampU8(100 + n), clampU8(65 + n), clampU8(30 + n));
+}
+
+fn genFarmlandSide(_: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Dark top stripe
+    if (y <= 1) return px(clampU8(85 + n), clampU8(55 + n), clampU8(25 + n));
+    // Dirt body
+    return px(clampU8(140 + n), clampU8(90 + n), clampU8(50 + n));
+}
+
+fn genWheat(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    const is_stalk = (x == 2 or x == 5 or x == 8 or x == 11 or x == 14);
+    if (y >= 13 and is_stalk)
+        return px(clampU8(60 + n), clampU8(120 + n), clampU8(30 + n));
+    if (y <= 2 and is_stalk)
+        return px(clampU8(200 + n), clampU8(180 + n), clampU8(50 + n));
+    if (y <= 2) {
+        if (x == 1 or x == 3 or x == 4 or x == 6 or x == 7 or x == 9 or x == 10 or x == 12 or x == 13)
+            return px(clampU8(190 + n), clampU8(170 + n), clampU8(45 + n));
+    }
+    if (is_stalk)
+        return px(clampU8(200 + n), clampU8(180 + n), clampU8(50 + n));
+    return .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+}
+
+fn genCropPlant(x: u32, y: u32, h: u32, tuber_color: Rgb) Pixel {
+    const n = noise16(h);
+    const is_stem = (x == 3 or x == 7 or x == 11);
+    if (is_stem and y <= 12)
+        return px(clampU8(50 + n), clampU8(130 + n), clampU8(30 + n));
+    if (y <= 3 and (x == 2 or x == 4 or x == 6 or x == 8 or x == 10 or x == 12))
+        return px(clampU8(40 + n), clampU8(110 + n), clampU8(25 + n));
+    if (y >= 14 and (x == 4 or x == 5 or x == 8 or x == 9 or x == 12 or x == 13))
+        return px(clampU8(@as(i32, tuber_color[0]) + n), clampU8(@as(i32, tuber_color[1]) + n), clampU8(@as(i32, tuber_color[2]) + n));
+    return .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+}
+
+fn genCarrots(x: u32, y: u32, h: u32) Pixel {
+    return genCropPlant(x, y, h, Rgb{ 230, 130, 30 });
+}
+
+fn genPotatoes(x: u32, y: u32, h: u32) Pixel {
+    return genCropPlant(x, y, h, Rgb{ 160, 120, 60 });
+}
+
+fn genMelonSide(x: u32, _: u32, h: u32) Pixel {
+    const n = noise16(h);
+    const stripe = x % 4;
+    if (stripe == 0) return px(clampU8(70 + n), clampU8(120 + n), clampU8(35 + n));
+    return px(clampU8(102 + n), clampU8(153 + n), clampU8(51 + n));
+}
+
+fn genJackOLanternFront(x: u32, y: u32, h: u32) Pixel {
+    const glow = px(255, 200, 50);
+    // Triangle left eye: y=4-7, widening downward from x=4
+    if (y >= 4 and y <= 7 and x >= 3 and x <= 5) {
+        const ey = y - 4;
+        const center: u32 = 4;
+        const half_w = ey;
+        if (x >= center - @min(half_w, center) and x <= center + half_w)
+            return glow;
+    }
+    // Triangle right eye: y=4-7, widening downward from x=11
+    if (y >= 4 and y <= 7 and x >= 10 and x <= 12) {
+        const ey = y - 4;
+        const center: u32 = 11;
+        const half_w = ey;
+        if (x >= center - @min(half_w, center) and x <= center + half_w)
+            return glow;
+    }
+    // Jagged mouth with triangle teeth
+    if (y >= 9 and y <= 12 and x >= 3 and x <= 12) {
+        const is_tooth = (y <= 10) and ((x == 5 or x == 6) or (x == 9 or x == 10));
+        if (!is_tooth) return glow;
+    }
+    return genPumpkinSide(x, y, h);
+}
+
+fn genPumpkinSide(x: u32, _: u32, h: u32) Pixel {
+    const n = noise16(h);
+    const rib = (x +% (h >> 8) % 2) % 4;
+    if (rib == 0) return px(clampU8(180 + n), clampU8(100 + n), clampU8(15 + n));
+    return px(clampU8(204 + n), clampU8(128 + n), clampU8(25 + n));
+}
+
+fn genPumpkinTop(_: u32, _: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if ((h >> 5) % 6 == 0) return px(clampU8(150 + n), clampU8(110 + n), clampU8(25 + n));
+    return px(clampU8(178 + n), clampU8(140 + n), clampU8(38 + n));
+}
+
+fn genHayBaleSide(_: u32, y: u32, h: u32) Pixel {
+    if (y == 3 or y == 12) {
+        const n = noise16(h);
+        return px(clampU8(90 + n), clampU8(60 + n), clampU8(25 + n));
+    }
+    const n = noise32(h);
+    return px(clampU8(200 + n), clampU8(180 + n), clampU8(80 + n));
+}
+
+fn genHayBaleTop(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Concentric circles from center
+    const dx = @as(i32, @intCast(x)) - 7;
+    const dy = @as(i32, @intCast(y)) - 7;
+    const dist: u32 = @intCast(@abs(dx) + @abs(dy));
+    const ring = dist % 3;
+    if (ring == 0) return px(clampU8(210 + n), clampU8(190 + n), clampU8(90 + n));
+    if (ring == 1) return px(clampU8(190 + n), clampU8(170 + n), clampU8(70 + n));
+    return px(clampU8(200 + n), clampU8(180 + n), clampU8(80 + n));
 }
 
 fn genWool(_: u32, _: u32, h: u32, base: Rgb) Pixel {
