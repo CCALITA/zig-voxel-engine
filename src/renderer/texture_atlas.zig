@@ -223,6 +223,7 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         72 => genDispenserFront(x, y, h),
         74 => genEnchantingTableTop(x, y, h),
         75 => genEnchantingTableSide(x, y, h),
+        76 => genEnchantingTableBottom(x, y, h),
         77 => genEndPortalFrameSide(x, y, h),
         78 => genEndPortalFrameTop(x, y, h),
         79 => genEndPortal(x, y, h),
@@ -236,6 +237,7 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         87 => genCarrots(x, y, h),
         88 => genPotatoes(x, y, h),
         89 => genMelonSide(x, y, h),
+        90 => genMelonTop(x, y, h),
         91 => genJackOLanternFront(x, y, h),
         92 => genPumpkinSide(x, y, h),
         93 => genPumpkinTop(x, y, h),
@@ -245,8 +247,8 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         112...115 => genTerracotta(x, y, h, base),
         116...119 => genConcrete(h, base),
         120 => genCopperBlock(x, y, h),
-        121 => genExposedCopper(h),
-        122 => genWeatheredCopper(h),
+        121 => genExposedCopper(x, y, h),
+        122 => genWeatheredCopper(x, y, h),
         123 => genOxidizedCopper(x, y, h),
         else => mixColor(base, if (fine_i32 > noise_i32) fine_i32 else noise_i32),
     };
@@ -377,9 +379,10 @@ fn genBrick(x: u32, y: u32, h: u32) Pixel {
     return .{ .r = clampU8(153 + n), .g = clampU8(76 + n), .b = clampU8(64 + n), .a = 255 };
 }
 
-fn genObsidian(_: u32, _: u32, h: u32) Pixel {
+fn genObsidian(x: u32, y: u32, h: u32) Pixel {
     const n = noise16(h);
-    if ((h >> 5) % 10 == 0) return .{ .r = clampU8(40 + n), .g = clampU8(20 + n), .b = clampU8(60 + n), .a = 255 };
+    const streak = (x *% 3 +% y *% 5 +% (h >> 4) % 16) % 12;
+    if (streak < 2) return .{ .r = clampU8(40 + n), .g = clampU8(20 + n), .b = clampU8(60 + n), .a = 255 };
     return .{ .r = clampU8(25 + @divTrunc(n, 2)), .g = clampU8(13 + @divTrunc(n, 2)), .b = clampU8(38 + @divTrunc(n, 2)), .a = 255 };
 }
 
@@ -392,6 +395,8 @@ fn genIce(_: u32, y: u32, h: u32) Pixel {
 
 fn genSnow(_: u32, _: u32, h: u32) Pixel {
     const n = noise16(h);
+    if ((h >> 7) % 40 == 0) return px(255, 255, 255);
+    if ((h >> 5) % 25 == 0) return px(210, 215, 230);
     return px(clampU8(230 + n), clampU8(235 + n), clampU8(242 + n));
 }
 
@@ -933,6 +938,12 @@ fn genEnchantingTableSide(_: u32, y: u32, h: u32) Pixel {
     return .{ .r = clampU8(25 + @divTrunc(n, 2)), .g = clampU8(15 + @divTrunc(n, 2)), .b = clampU8(35 + @divTrunc(n, 2)), .a = 255 };
 }
 
+fn genEnchantingTableBottom(x: u32, _: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x % 6 == 0) return .{ .r = clampU8(30 + n), .g = clampU8(12 + @divTrunc(n, 2)), .b = clampU8(45 + n), .a = 255 };
+    return .{ .r = clampU8(20 + @divTrunc(n, 2)), .g = clampU8(10 + @divTrunc(n, 2)), .b = clampU8(30 + @divTrunc(n, 2)), .a = 255 };
+}
+
 fn genEndPortalFrameSide(x: u32, y: u32, h: u32) Pixel {
     const n = noise16(h);
     // Eye socket: dark circle at center with green iris
@@ -1110,7 +1121,10 @@ fn genHayBaleTop(x: u32, y: u32, h: u32) Pixel {
 // --- Concrete & Copper (PR 256) ---
 
 fn genConcrete(h: u32, base: Rgb) Pixel {
-    return mixColor(base, noise16(h));
+    const n = noise16(h);
+    if ((h >> 6) % 15 == 0) return mixColor(base, n + 12);
+    if ((h >> 8) % 20 == 0) return mixColor(base, n - 10);
+    return mixColor(base, n);
 }
 
 fn genCopperBlock(_: u32, y: u32, h: u32) Pixel {
@@ -1120,15 +1134,19 @@ fn genCopperBlock(_: u32, y: u32, h: u32) Pixel {
     return px(clampU8(192 + n + sheen), clampU8(115 + n + sheen), clampU8(71 + n + sheen));
 }
 
-fn genExposedCopper(h: u32) Pixel {
+fn genExposedCopper(x: u32, y: u32, h: u32) Pixel {
     const n = noise16(h);
-    if (h % 5 == 0) return px(clampU8(60 + n), clampU8(140 + n), clampU8(90 + n));
+    if (y % 8 == 0) return px(clampU8(140 + n), clampU8(95 + n), clampU8(60 + n));
+    const patch = hash(x / 3, y / 3, 121);
+    if (patch % 5 == 0) return px(clampU8(60 + n), clampU8(140 + n), clampU8(90 + n));
     return px(clampU8(166 + n), clampU8(128 + n), clampU8(90 + n));
 }
 
-fn genWeatheredCopper(h: u32) Pixel {
+fn genWeatheredCopper(x: u32, y: u32, h: u32) Pixel {
     const n = noise16(h);
-    if (h % 10 < 3) return px(clampU8(166 + n), clampU8(128 + n), clampU8(90 + n));
+    if (y % 8 == 0) return px(clampU8(90 + n), clampU8(115 + n), clampU8(90 + n));
+    const patch = hash(x / 3, y / 3, 122);
+    if (patch % 10 < 3) return px(clampU8(166 + n), clampU8(128 + n), clampU8(90 + n));
     return px(clampU8(115 + n), clampU8(150 + n), clampU8(115 + n));
 }
 
@@ -1139,7 +1157,7 @@ fn genOxidizedCopper(x: u32, y: u32, h: u32) Pixel {
 }
 
 fn genWool(x: u32, y: u32, _: u32, base: Rgb) Pixel {
-    const weave: i32 = if (x % 2 != y % 2) 5 else -5;
+    const weave: i32 = if ((x / 2 + y / 2) % 2 == 0) 8 else -8;
     return mixColor(base, weave);
 }
 
