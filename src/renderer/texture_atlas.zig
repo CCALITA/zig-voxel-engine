@@ -51,6 +51,10 @@ fn init_base_colors() [256]Rgb {
     c[35] = .{ 115, 51, 51 }; // netherrack
     c[36] = .{ 90, 71, 56 }; // soul sand
     c[37] = .{ 192, 64, 51 }; // lava
+    c[45] = .{ 130, 130, 130 }; // furnace side
+    c[46] = .{ 128, 128, 128 }; // furnace top
+    c[51] = .{ 150, 105, 55 }; // chest side
+    c[52] = .{ 150, 105, 55 }; // chest top
     // Wool colors (96-111)
     c[96] = .{ 242, 242, 242 }; // white
     c[97] = .{ 230, 140, 38 }; // orange
@@ -159,11 +163,18 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         18 => genGlass(x, y),
         19 => genBrick(x, y, h),
         20 => genObsidian(x, y, h),
+        21 => genTntSide(x, y, h),
+        22 => genTntTop(x, y, h),
+        23 => genBookshelf(x, y, h),
         25 => genIce(x, y, h),
         26 => genSnow(x, y, h),
         34 => genGlowstone(x, y, h),
         35 => genNetherrack(x, y, h),
         37 => genLava(x, y, h),
+        45 => genFurnaceSide(x, y, h),
+        46 => genFurnaceTop(x, y, h),
+        51 => genChestSide(x, y, h),
+        52 => genChestTop(x, y, h),
         96...111 => genWool(x, y, h, base),
         112...115 => genTerracotta(x, y, h, base),
         else => mixColor(base, if (fine_i32 > noise_i32) fine_i32 else noise_i32),
@@ -331,6 +342,88 @@ fn genLava(_: u32, y: u32, h: u32) Pixel {
     if (flow == 0) return px(255, clampU8(180 + n), 50);
     if (flow == 1) return px(255, clampU8(120 + n), 30);
     return .{ .r = clampU8(192 + n), .g = clampU8(64 + n), .b = clampU8(51 + @divTrunc(n, 2)), .a = 255 };
+}
+
+fn genTntSide(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Red bands: top 3px and bottom 3px
+    if (y < 3 or y > 12) return .{ .r = clampU8(192 + n), .g = clampU8(50 + @divTrunc(n, 2)), .b = clampU8(40 + @divTrunc(n, 2)), .a = 255 };
+    // Dark fuse line at x=7-8
+    if ((x == 7 or x == 8) and y >= 3 and y <= 5) return px(clampU8(40 + @divTrunc(n, 4)), clampU8(35 + @divTrunc(n, 4)), clampU8(30 + @divTrunc(n, 4)));
+    // Brown/tan TNT label area y=6..9
+    if (y >= 6 and y <= 9) return .{ .r = clampU8(160 + n), .g = clampU8(120 + n), .b = clampU8(70 + n), .a = 255 };
+    // White center
+    return .{ .r = clampU8(230 + @divTrunc(n, 2)), .g = clampU8(225 + @divTrunc(n, 2)), .b = clampU8(220 + @divTrunc(n, 2)), .a = 255 };
+}
+
+fn genTntTop(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    const cx: i32 = @as(i32, @intCast(x)) - 7;
+    const cy: i32 = @as(i32, @intCast(y)) - 7;
+    const dist = @abs(cx) + @abs(cy);
+    // Fuse hole at center (2px radius)
+    if (dist <= 2) return px(clampU8(30 + @divTrunc(n, 4)), clampU8(25 + @divTrunc(n, 4)), clampU8(20 + @divTrunc(n, 4)));
+    // Concentric square pattern
+    const ring = @max(@abs(cx), @abs(cy));
+    const shade: i32 = if (ring % 2 == 0) 10 else -10;
+    return .{ .r = clampU8(160 + shade + n), .g = clampU8(150 + shade + n), .b = clampU8(135 + shade + n), .a = 255 };
+}
+
+fn genBookshelf(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Wood frame: top/bottom 2px
+    if (y < 2 or y > 13) return .{ .r = clampU8(140 + n), .g = clampU8(100 + n), .b = clampU8(50 + n), .a = 255 };
+    // Shelf divider at y=8
+    if (y == 8) return .{ .r = clampU8(100 + @divTrunc(n, 2)), .g = clampU8(70 + @divTrunc(n, 2)), .b = clampU8(35 + @divTrunc(n, 2)), .a = 255 };
+    // Book spines: cycle through colors every 3-4px
+    const book_idx = x / 3;
+    const colors = [5]Rgb{ .{ 180, 50, 50 }, .{ 50, 60, 170 }, .{ 50, 140, 50 }, .{ 200, 180, 50 }, .{ 120, 80, 50 } };
+    const c = colors[book_idx % 5];
+    return .{ .r = clampU8(@as(i32, c[0]) + n), .g = clampU8(@as(i32, c[1]) + n), .b = clampU8(@as(i32, c[2]) + n), .a = 255 };
+}
+
+fn genFurnaceSide(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Dark front opening: 6x4px rectangle centered in lower half (x=5..10, y=9..12)
+    if (x >= 5 and x <= 10 and y >= 9 and y <= 12) return px(clampU8(30 + @divTrunc(n, 4)), clampU8(28 + @divTrunc(n, 4)), clampU8(25 + @divTrunc(n, 4)));
+    // Stone bricks frame pattern
+    const bx = x % 8;
+    const by = y % 4;
+    if (bx == 0 or by == 0) return .{ .r = clampU8(100 + n), .g = clampU8(100 + n), .b = clampU8(100 + n), .a = 255 };
+    return .{ .r = clampU8(130 + n), .g = clampU8(130 + n), .b = clampU8(130 + n), .a = 255 };
+}
+
+fn genFurnaceTop(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Cross-shaped tool marks at center
+    if ((x == 7 or x == 8) and y >= 3 and y <= 12) return .{ .r = clampU8(110 + n), .g = clampU8(110 + n), .b = clampU8(110 + n), .a = 255 };
+    if ((y == 7 or y == 8) and x >= 3 and x <= 12) return .{ .r = clampU8(110 + n), .g = clampU8(110 + n), .b = clampU8(110 + n), .a = 255 };
+    // Stone background
+    return .{ .r = clampU8(128 + n), .g = clampU8(128 + n), .b = clampU8(128 + n), .a = 255 };
+}
+
+fn genChestSide(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Lock plate: 3x2px centered at y=7 (x=6..8, y=6..7)
+    if (x >= 6 and x <= 8 and (y == 6 or y == 7)) {
+        // Golden latch dot at center of lock
+        if (x == 7 and y == 7) return px(clampU8(220 + @divTrunc(n, 4)), clampU8(190 + @divTrunc(n, 4)), clampU8(50 + @divTrunc(n, 4)));
+        return px(clampU8(50 + @divTrunc(n, 4)), clampU8(45 + @divTrunc(n, 4)), clampU8(40 + @divTrunc(n, 4)));
+    }
+    // Brown planks with horizontal grain
+    const band = y % 4;
+    if (band == 0) return .{ .r = clampU8(130 + n), .g = clampU8(90 + n), .b = clampU8(45 + n), .a = 255 };
+    return .{ .r = clampU8(150 + n), .g = clampU8(105 + n), .b = clampU8(55 + n), .a = 255 };
+}
+
+fn genChestTop(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Darker trim at edges
+    if (x == 0 or x == 15 or y == 0 or y == 15) return .{ .r = clampU8(110 + n), .g = clampU8(75 + n), .b = clampU8(35 + n), .a = 255 };
+    // Horizontal clasp line at y=8
+    if (y == 8) return .{ .r = clampU8(100 + @divTrunc(n, 2)), .g = clampU8(70 + @divTrunc(n, 2)), .b = clampU8(30 + @divTrunc(n, 2)), .a = 255 };
+    // Brown planks
+    return .{ .r = clampU8(150 + n), .g = clampU8(105 + n), .b = clampU8(55 + n), .a = 255 };
 }
 
 fn genWool(_: u32, _: u32, h: u32, base: Rgb) Pixel {
