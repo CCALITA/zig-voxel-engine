@@ -159,8 +159,16 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         18 => genGlass(x, y),
         19 => genBrick(x, y, h),
         20 => genObsidian(x, y, h),
+        24 => genMossyCobblestone(x, y, h),
         25 => genIce(x, y, h),
         26 => genSnow(x, y, h),
+        27 => genClay(x, y, h),
+        28 => genCactusSide(x, y, h),
+        29 => genCactusTop(x, y, h),
+        30 => genPumpkinSide(x, y, h),
+        31 => genPumpkinTop(x, y, h),
+        32 => genMelonSide(x, y, h),
+        33 => genMelonTop(x, y, h),
         34 => genGlowstone(x, y, h),
         35 => genNetherrack(x, y, h),
         37 => genLava(x, y, h),
@@ -299,6 +307,87 @@ fn genObsidian(_: u32, _: u32, h: u32) Pixel {
     const n = noise16(h);
     if ((h >> 5) % 10 == 0) return .{ .r = clampU8(40 + n), .g = clampU8(20 + n), .b = clampU8(60 + n), .a = 255 };
     return .{ .r = clampU8(25 + @divTrunc(n, 2)), .g = clampU8(13 + @divTrunc(n, 2)), .b = clampU8(38 + @divTrunc(n, 2)), .a = 255 };
+}
+
+fn genMossyCobblestone(x: u32, y: u32, h: u32) Pixel {
+    const sx = (x +% (h >> 10) % 2) % 5;
+    const sy = (y +% (h >> 12) % 2) % 5;
+    if (sx == 0 or sy == 0) {
+        // Mortar line — ~30% chance of moss
+        const moss_h = hash(x, y, 2400);
+        if (moss_h % 10 < 3) {
+            const n = noise16(h);
+            return .{ .r = clampU8(50 + n), .g = clampU8(120 + n), .b = clampU8(40 + n), .a = 255 };
+        }
+        return px(60, 60, 60);
+    }
+    const n = noise32(h);
+    const shade: i32 = @as(i32, @intCast((h >> 6) % 30)) - 15;
+    const v = clampU8(110 + n + shade);
+    return px(v, v, clampU8(@as(i32, v) - 5));
+}
+
+fn genClay(_: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    const layer: i32 = if (y % 4 == 0) @as(i32, -5) else @as(i32, 0);
+    return .{ .r = clampU8(166 + n + layer), .g = clampU8(158 + n + layer), .b = clampU8(148 + n + layer), .a = 255 };
+}
+
+fn genCactusSide(x: u32, _: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x % 4 == 0) return .{ .r = clampU8(35 + n), .g = clampU8(100 + n), .b = clampU8(25 + n), .a = 255 };
+    // Spine dots — ~8% chance
+    if ((h >> 5) % 12 == 0) return .{ .r = clampU8(80 + n), .g = clampU8(190 + n), .b = clampU8(70 + n), .a = 255 };
+    return .{ .r = clampU8(51 + n), .g = clampU8(140 + n), .b = clampU8(38 + n), .a = 255 };
+}
+
+fn genCactusTop(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    const dx = @as(i32, @intCast(x)) - 7;
+    const dy = @as(i32, @intCast(y)) - 7;
+    // Cross/star shape: center cross is lighter
+    if (@abs(dx) <= 2 or @abs(dy) <= 2) {
+        return .{ .r = clampU8(80 + n), .g = clampU8(180 + n), .b = clampU8(65 + n), .a = 255 };
+    }
+    return .{ .r = clampU8(50 + n), .g = clampU8(130 + n), .b = clampU8(40 + n), .a = 255 };
+}
+
+fn genPumpkinSide(x: u32, _: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x % 4 == 0) return .{ .r = clampU8(140 + n), .g = clampU8(80 + n), .b = clampU8(10 + n), .a = 255 };
+    return .{ .r = clampU8(204 + n), .g = clampU8(128 + n), .b = clampU8(25 + n), .a = 255 };
+}
+
+fn genPumpkinTop(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Brown stem centered top (x 6..9, y 0..3)
+    if (x >= 6 and x <= 9 and y <= 3) {
+        if (x == 6 or x == 9) {
+            // Green vine hint on sides of stem
+            return .{ .r = clampU8(50 + n), .g = clampU8(120 + n), .b = clampU8(30 + n), .a = 255 };
+        }
+        return .{ .r = clampU8(100 + n), .g = clampU8(70 + n), .b = clampU8(20 + n), .a = 255 };
+    }
+    return .{ .r = clampU8(178 + n), .g = clampU8(140 + n), .b = clampU8(38 + n), .a = 255 };
+}
+
+fn genMelonSide(x: u32, _: u32, h: u32) Pixel {
+    const n = noise16(h);
+    if (x == 0 or x == 15) return .{ .r = clampU8(60 + n), .g = clampU8(100 + n), .b = clampU8(30 + n), .a = 255 };
+    if (x % 3 == 0) return .{ .r = clampU8(120 + n), .g = clampU8(180 + n), .b = clampU8(70 + n), .a = 255 };
+    return .{ .r = clampU8(102 + n), .g = clampU8(153 + n), .b = clampU8(51 + n), .a = 255 };
+}
+
+fn genMelonTop(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    const dx = @as(i32, @intCast(x)) - 7;
+    const dy = @as(i32, @intCast(y)) - 7;
+    // Brown center spot (3x3)
+    if (@abs(dx) <= 1 and @abs(dy) <= 1) return .{ .r = clampU8(115 + n), .g = clampU8(80 + n), .b = clampU8(30 + n), .a = 255 };
+    // Radial lighter stripes
+    const dist: u32 = @intCast(@abs(dx) + @abs(dy));
+    if (dist % 3 == 0) return .{ .r = clampU8(130 + n), .g = clampU8(170 + n), .b = clampU8(75 + n), .a = 255 };
+    return .{ .r = clampU8(115 + n), .g = clampU8(140 + n), .b = clampU8(64 + n), .a = 255 };
 }
 
 fn genIce(_: u32, y: u32, h: u32) Pixel {
