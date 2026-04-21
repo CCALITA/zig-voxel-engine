@@ -4,6 +4,7 @@ const zglfw = @import("zglfw");
 const pipeline_mod = @import("pipeline.zig");
 const ui_pipeline_mod = @import("ui_pipeline.zig");
 const mesh_indexed = @import("world/mesh_indexed.zig");
+const texture_atlas = @import("renderer/texture_atlas.zig");
 
 const Self = @This();
 
@@ -74,6 +75,15 @@ present_family: u32,
 // Graphics pipeline
 terrain_pipeline: vk.Pipeline,
 terrain_pipeline_layout: vk.PipelineLayout,
+
+// Texture atlas resources
+atlas_image: vk.Image = .null_handle,
+atlas_image_memory: vk.DeviceMemory = .null_handle,
+atlas_image_view: vk.ImageView = .null_handle,
+atlas_sampler: vk.Sampler = .null_handle,
+descriptor_pool: vk.DescriptorPool = .null_handle,
+descriptor_set: vk.DescriptorSet = .null_handle,
+descriptor_set_layout: vk.DescriptorSetLayout = .null_handle,
 
 // UI overlay pipeline (2D, alpha blended, no depth)
 ui_pipeline: vk.Pipeline,
@@ -190,7 +200,10 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
     // Create sync objects
     try self.createSyncObjects();
 
-    // Create terrain graphics pipeline
+    // Create texture atlas resources (image, sampler, descriptors)
+    try self.createTextureAtlas();
+
+    // Create terrain graphics pipeline (needs descriptor set layout)
     const vert_spv: []align(4) const u8 = @alignCast(@embedFile("shaders/terrain.vert.spv"));
     const frag_spv: []align(4) const u8 = @alignCast(@embedFile("shaders/terrain.frag.spv"));
 
@@ -200,6 +213,7 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
         self.render_pass,
         vert_spv,
         frag_spv,
+        self.descriptor_set_layout,
     );
     self.terrain_pipeline = pl.pipeline;
     self.terrain_pipeline_layout = pl.layout;
@@ -251,6 +265,13 @@ pub fn deinit(self: *Self) void {
     self.chunk_renders.deinit(self.allocator);
     self.vkd.destroyPipeline(self.device, self.terrain_pipeline, null);
     self.vkd.destroyPipelineLayout(self.device, self.terrain_pipeline_layout, null);
+    // Destroy texture atlas resources
+    if (self.atlas_sampler != .null_handle) self.vkd.destroySampler(self.device, self.atlas_sampler, null);
+    if (self.atlas_image_view != .null_handle) self.vkd.destroyImageView(self.device, self.atlas_image_view, null);
+    if (self.atlas_image != .null_handle) self.vkd.destroyImage(self.device, self.atlas_image, null);
+    if (self.atlas_image_memory != .null_handle) self.vkd.freeMemory(self.device, self.atlas_image_memory, null);
+    if (self.descriptor_pool != .null_handle) self.vkd.destroyDescriptorPool(self.device, self.descriptor_pool, null);
+    if (self.descriptor_set_layout != .null_handle) self.vkd.destroyDescriptorSetLayout(self.device, self.descriptor_set_layout, null);
     self.vkd.destroyPipeline(self.device, self.ui_pipeline, null);
     self.vkd.destroyPipelineLayout(self.device, self.ui_pipeline_layout, null);
     if (self.ui_vertex_buffer != .null_handle) {
@@ -833,6 +854,10 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
     if (self.chunk_renders.items.len > 0) {
         self.vkd.cmdBindPipeline(cmd, .graphics, self.terrain_pipeline);
 
+        // Bind texture atlas descriptor set
+        const desc_sets = [_]vk.DescriptorSet{self.descriptor_set};
+        self.vkd.cmdBindDescriptorSets(cmd, .graphics, self.terrain_pipeline_layout, 0, 1, &desc_sets, 0, null);
+
         // Dynamic viewport
         self.vkd.cmdSetViewport(cmd, 0, 1, &.{vk.Viewport{
             .x = 0.0,
@@ -1108,6 +1133,195 @@ fn mat4Mul(a: [4][4]f32, b: [4][4]f32) [4][4]f32 {
         }
     }
     return result;
+}
+
+fn createTextureAtlas(self: *Self) !void {
+    const atlas_w: u32 = texture_atlas.ATLAS_SIZE;
+    const atlas_h: u32 = texture_atlas.ATLAS_SIZE;
+    const pixel_count = atlas_w * atlas_h;
+    const image_size: vk.DeviceSize = pixel_count * 4; // RGBA
+
+    // Generate atlas pixel data on CPU
+    const pixels = try self.allocator.alloc(texture_atlas.Pixel, pixel_count);
+    defer self.allocator.free(pixels);
+    const gen_pixels = try texture_atlas.generateAtlas(self.allocator);
+    defer self.allocator.free(gen_pixels);
+    @memcpy(pixels, gen_pixels);
+
+    // Create staging buffer
+    const staging = try self.createHostBuffer(.{ .transfer_src_bit = true }, image_size);
+    defer self.vkd.destroyBuffer(self.device, staging.buffer, null);
+    defer self.vkd.freeMemory(self.device, staging.memory, null);
+
+    // Copy pixel data to staging buffer
+    const data_ptr = try self.vkd.mapMemory(self.device, staging.memory, 0, image_size, .{});
+    const dst: [*]u8 = @ptrCast(data_ptr);
+    const src: [*]const u8 = @ptrCast(pixels.ptr);
+    @memcpy(dst[0..@intCast(image_size)], src[0..@intCast(image_size)]);
+    self.vkd.unmapMemory(self.device, staging.memory);
+
+    // Create VkImage
+    self.atlas_image = try self.vkd.createImage(self.device, &.{
+        .image_type = .@"2d",
+        .format = .r8g8b8a8_unorm,
+        .extent = .{ .width = atlas_w, .height = atlas_h, .depth = 1 },
+        .mip_levels = 1,
+        .array_layers = 1,
+        .samples = .{ .@"1_bit" = true },
+        .tiling = .optimal,
+        .usage = .{ .transfer_dst_bit = true, .sampled_bit = true },
+        .sharing_mode = .exclusive,
+        .initial_layout = .undefined,
+    }, null);
+
+    // Allocate device-local memory for image
+    const img_mem_reqs = self.vkd.getImageMemoryRequirements(self.device, self.atlas_image);
+    const img_mem_type = try self.findMemoryType(img_mem_reqs.memory_type_bits, .{ .device_local_bit = true });
+    self.atlas_image_memory = try self.vkd.allocateMemory(self.device, &.{
+        .allocation_size = img_mem_reqs.size,
+        .memory_type_index = img_mem_type,
+    }, null);
+    try self.vkd.bindImageMemory(self.device, self.atlas_image, self.atlas_image_memory, 0);
+
+    // Transition, copy, transition (using a one-shot command buffer)
+    const cmd = try self.beginSingleTimeCommands();
+
+    // Transition: undefined -> transfer_dst
+    self.vkd.cmdPipelineBarrier(cmd, .{ .top_of_pipe_bit = true }, .{ .transfer_bit = true }, .{}, 0, null, 0, null, 1, &[_]vk.ImageMemoryBarrier{.{
+        .src_access_mask = .{},
+        .dst_access_mask = .{ .transfer_write_bit = true },
+        .old_layout = .undefined,
+        .new_layout = .transfer_dst_optimal,
+        .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+        .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+        .image = self.atlas_image,
+        .subresource_range = .{ .aspect_mask = .{ .color_bit = true }, .base_mip_level = 0, .level_count = 1, .base_array_layer = 0, .layer_count = 1 },
+    }});
+
+    // Copy staging buffer -> image
+    self.vkd.cmdCopyBufferToImage(cmd, staging.buffer, self.atlas_image, .transfer_dst_optimal, 1, &[_]vk.BufferImageCopy{.{
+        .buffer_offset = 0,
+        .buffer_row_length = 0,
+        .buffer_image_height = 0,
+        .image_subresource = .{ .aspect_mask = .{ .color_bit = true }, .mip_level = 0, .base_array_layer = 0, .layer_count = 1 },
+        .image_offset = .{ .x = 0, .y = 0, .z = 0 },
+        .image_extent = .{ .width = atlas_w, .height = atlas_h, .depth = 1 },
+    }});
+
+    // Transition: transfer_dst -> shader_read_only
+    self.vkd.cmdPipelineBarrier(cmd, .{ .transfer_bit = true }, .{ .fragment_shader_bit = true }, .{}, 0, null, 0, null, 1, &[_]vk.ImageMemoryBarrier{.{
+        .src_access_mask = .{ .transfer_write_bit = true },
+        .dst_access_mask = .{ .shader_read_bit = true },
+        .old_layout = .transfer_dst_optimal,
+        .new_layout = .shader_read_only_optimal,
+        .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+        .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
+        .image = self.atlas_image,
+        .subresource_range = .{ .aspect_mask = .{ .color_bit = true }, .base_mip_level = 0, .level_count = 1, .base_array_layer = 0, .layer_count = 1 },
+    }});
+
+    try self.endSingleTimeCommands(cmd);
+
+    // Create image view
+    self.atlas_image_view = try self.vkd.createImageView(self.device, &.{
+        .image = self.atlas_image,
+        .view_type = .@"2d",
+        .format = .r8g8b8a8_unorm,
+        .components = .{ .r = .identity, .g = .identity, .b = .identity, .a = .identity },
+        .subresource_range = .{ .aspect_mask = .{ .color_bit = true }, .base_mip_level = 0, .level_count = 1, .base_array_layer = 0, .layer_count = 1 },
+    }, null);
+
+    // Create sampler with NEAREST filtering for pixel-art look
+    self.atlas_sampler = try self.vkd.createSampler(self.device, &.{
+        .mag_filter = .nearest,
+        .min_filter = .nearest,
+        .mipmap_mode = .nearest,
+        .address_mode_u = .clamp_to_edge,
+        .address_mode_v = .clamp_to_edge,
+        .address_mode_w = .clamp_to_edge,
+        .mip_lod_bias = 0,
+        .anisotropy_enable = vk.Bool32.false,
+        .max_anisotropy = 1,
+        .compare_enable = vk.Bool32.false,
+        .compare_op = .always,
+        .min_lod = 0,
+        .max_lod = 0,
+        .border_color = .float_opaque_black,
+        .unnormalized_coordinates = vk.Bool32.false,
+    }, null);
+
+    // Create descriptor set layout
+    const bindings = [_]vk.DescriptorSetLayoutBinding{.{
+        .binding = 0,
+        .descriptor_type = .combined_image_sampler,
+        .descriptor_count = 1,
+        .stage_flags = .{ .fragment_bit = true },
+    }};
+    self.descriptor_set_layout = try self.vkd.createDescriptorSetLayout(self.device, &.{
+        .binding_count = bindings.len,
+        .p_bindings = &bindings,
+    }, null);
+
+    // Create descriptor pool
+    const pool_sizes = [_]vk.DescriptorPoolSize{.{
+        .type = .combined_image_sampler,
+        .descriptor_count = 1,
+    }};
+    self.descriptor_pool = try self.vkd.createDescriptorPool(self.device, &.{
+        .max_sets = 1,
+        .pool_size_count = pool_sizes.len,
+        .p_pool_sizes = &pool_sizes,
+    }, null);
+
+    // Allocate descriptor set
+    const layouts = [_]vk.DescriptorSetLayout{self.descriptor_set_layout};
+    var sets: [1]vk.DescriptorSet = undefined;
+    try self.vkd.allocateDescriptorSets(self.device, &.{
+        .descriptor_pool = self.descriptor_pool,
+        .descriptor_set_count = 1,
+        .p_set_layouts = &layouts,
+    }, &sets);
+    self.descriptor_set = sets[0];
+
+    // Write descriptor set
+    const image_info = [_]vk.DescriptorImageInfo{.{
+        .sampler = self.atlas_sampler,
+        .image_view = self.atlas_image_view,
+        .image_layout = .shader_read_only_optimal,
+    }};
+    self.vkd.updateDescriptorSets(self.device, 1, &[_]vk.WriteDescriptorSet{.{
+        .dst_set = self.descriptor_set,
+        .dst_binding = 0,
+        .dst_array_element = 0,
+        .descriptor_count = 1,
+        .descriptor_type = .combined_image_sampler,
+        .p_image_info = &image_info,
+        .p_buffer_info = &[_]vk.DescriptorBufferInfo{},
+        .p_texel_buffer_view = &[_]vk.BufferView{},
+    }}, 0, null);
+}
+
+fn beginSingleTimeCommands(self: *Self) !vk.CommandBuffer {
+    var bufs: [1]vk.CommandBuffer = undefined;
+    try self.vkd.allocateCommandBuffers(self.device, &.{
+        .command_pool = self.command_pool,
+        .level = .primary,
+        .command_buffer_count = 1,
+    }, &bufs);
+    try self.vkd.beginCommandBuffer(bufs[0], &.{ .flags = .{ .one_time_submit_bit = true } });
+    return bufs[0];
+}
+
+fn endSingleTimeCommands(self: *Self, cmd: vk.CommandBuffer) !void {
+    try self.vkd.endCommandBuffer(cmd);
+    const cmds = [_]vk.CommandBuffer{cmd};
+    const submit = [_]vk.SubmitInfo{.{
+        .command_buffer_count = 1,
+        .p_command_buffers = &cmds,
+    }};
+    try self.vkd.queueSubmit(self.graphics_queue, 1, &submit, .null_handle);
+    self.vkd.queueWaitIdle(self.graphics_queue) catch {};
+    self.vkd.freeCommandBuffers(self.device, self.command_pool, 1, &cmds);
 }
 
 const HostBuffer = struct {

@@ -18,8 +18,8 @@ pub fn create(
     render_pass: vk.RenderPass,
     vert_spv: []align(4) const u8,
     frag_spv: []align(4) const u8,
+    descriptor_set_layout: vk.DescriptorSetLayout,
 ) !struct { pipeline: vk.Pipeline, layout: vk.PipelineLayout } {
-    // Shader modules
     const vert_module = try vkd.createShaderModule(device, &.{
         .code_size = vert_spv.len,
         .p_code = @ptrCast(vert_spv.ptr),
@@ -33,31 +33,21 @@ pub fn create(
     defer vkd.destroyShaderModule(device, frag_module, null);
 
     const shader_stages = [_]vk.PipelineShaderStageCreateInfo{
-        .{
-            .stage = .{ .vertex_bit = true },
-            .module = vert_module,
-            .p_name = "main",
-        },
-        .{
-            .stage = .{ .fragment_bit = true },
-            .module = frag_module,
-            .p_name = "main",
-        },
+        .{ .stage = .{ .vertex_bit = true }, .module = vert_module, .p_name = "main" },
+        .{ .stage = .{ .fragment_bit = true }, .module = frag_module, .p_name = "main" },
     };
 
-    // Vertex input: single u32 per vertex
+    // Two-attribute vertex: pos_data (u32) + tex_data (u32) = 8 bytes stride
     const binding_desc = [_]vk.VertexInputBindingDescription{.{
         .binding = 0,
-        .stride = 4, // sizeof(u32)
+        .stride = 8,
         .input_rate = .vertex,
     }};
 
-    const attr_desc = [_]vk.VertexInputAttributeDescription{.{
-        .binding = 0,
-        .location = 0,
-        .format = .r32_uint,
-        .offset = 0,
-    }};
+    const attr_desc = [_]vk.VertexInputAttributeDescription{
+        .{ .binding = 0, .location = 0, .format = .r32_uint, .offset = 0 },
+        .{ .binding = 0, .location = 1, .format = .r32_uint, .offset = 4 },
+    };
 
     const vertex_input = vk.PipelineVertexInputStateCreateInfo{
         .vertex_binding_description_count = binding_desc.len,
@@ -71,7 +61,6 @@ pub fn create(
         .primitive_restart_enable = vk.Bool32.false,
     };
 
-    // Dynamic viewport and scissor
     const dynamic_states = [_]vk.DynamicState{ .viewport, .scissor };
     const dynamic_state = vk.PipelineDynamicStateCreateInfo{
         .dynamic_state_count = dynamic_states.len,
@@ -105,12 +94,7 @@ pub fn create(
     };
 
     const blend_attachment = [_]vk.PipelineColorBlendAttachmentState{.{
-        .color_write_mask = .{
-            .r_bit = true,
-            .g_bit = true,
-            .b_bit = true,
-            .a_bit = true,
-        },
+        .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
         .blend_enable = vk.Bool32.false,
         .src_color_blend_factor = .one,
         .dst_color_blend_factor = .zero,
@@ -128,15 +112,16 @@ pub fn create(
         .blend_constants = .{ 0.0, 0.0, 0.0, 0.0 },
     };
 
-    // Push constant range for MVP matrix and fog parameters
     const push_range = [_]vk.PushConstantRange{.{
         .stage_flags = .{ .vertex_bit = true, .fragment_bit = true },
         .offset = 0,
         .size = @sizeOf(PushConstants),
     }};
 
+    const set_layouts = [_]vk.DescriptorSetLayout{descriptor_set_layout};
     const layout = try vkd.createPipelineLayout(device, &.{
-        .set_layout_count = 0,
+        .set_layout_count = set_layouts.len,
+        .p_set_layouts = &set_layouts,
         .push_constant_range_count = push_range.len,
         .p_push_constant_ranges = &push_range,
     }, null);

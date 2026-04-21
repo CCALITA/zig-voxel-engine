@@ -1,25 +1,31 @@
 /// Indexed mesh generator for chunk data.
-/// Each exposed face produces 4 unique vertices and 6 indices (two triangles),
-/// reducing vertex count compared to the naive 6-vertices-per-quad approach.
+/// Each exposed face produces 4 unique vertices and 6 indices (two triangles).
 ///
-/// Vertex format (packed u32):
-///   x(5) y(5) z(5) face(3) corner(2) ao(2) light(4) tex(6) = 32 bits
+/// Vertex format (two u32 attributes):
+///   pos_data: x(5) y(5) z(5) face(3) corner(2) ao(2) light(4) pad(6) = 32 bits
+///   tex_data: tex(12) anim(4) tint(8) reserved(8) = 32 bits
 const std = @import("std");
 const block = @import("block.zig");
 const Chunk = @import("chunk.zig");
 const ao_mod = @import("ao.zig");
 const light_mod = @import("light.zig");
 
-pub const Vertex = packed struct(u32) {
-    x: u5,
-    y: u5,
-    z: u5,
-    face: u3,
-    corner: u2,
-    ao: u2,
-    light: u4,
-    tex: u6,
+pub const Vertex = extern struct {
+    pos_data: u32,
+    tex_data: u32,
 };
+
+pub fn makeVertex(x: u5, y: u5, z: u5, face: u3, corner: u2, ao: u2, light: u4, tex: u16) Vertex {
+    const pos: u32 = @as(u32, x) |
+        (@as(u32, y) << 5) |
+        (@as(u32, z) << 10) |
+        (@as(u32, face) << 15) |
+        (@as(u32, corner) << 18) |
+        (@as(u32, ao) << 20) |
+        (@as(u32, light) << 22);
+    const td: u32 = @as(u32, tex) & 0xFFF;
+    return .{ .pos_data = pos, .tex_data = td };
+}
 
 pub const IndexedMeshData = struct {
     vertices: []Vertex,
@@ -33,42 +39,31 @@ pub const IndexedMeshData = struct {
 };
 
 // Face vertex offsets: 4 corners per face, each a (dx, dy, dz) offset.
-// Winding order is CCW when viewed from outside the block.
 const face_vertices = [6][4][3]u1{
-    // North (-Z): x goes right-to-left when looking at the face
     .{ .{ 1, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 1, 0 }, .{ 1, 1, 0 } },
-    // South (+Z)
     .{ .{ 0, 0, 1 }, .{ 1, 0, 1 }, .{ 1, 1, 1 }, .{ 0, 1, 1 } },
-    // East (+X)
     .{ .{ 1, 0, 1 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 1, 1, 1 } },
-    // West (-X)
     .{ .{ 0, 0, 0 }, .{ 0, 0, 1 }, .{ 0, 1, 1 }, .{ 0, 1, 0 } },
-    // Top (+Y)
     .{ .{ 0, 1, 0 }, .{ 0, 1, 1 }, .{ 1, 1, 1 }, .{ 1, 1, 0 } },
-    // Bottom (-Y)
     .{ .{ 0, 0, 1 }, .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 0, 1 } },
 };
 
-// Face normal directions for neighbor checking.
 pub const face_normals = [6][3]i32{
-    .{ 0, 0, -1 }, // North
-    .{ 0, 0, 1 }, // South
-    .{ 1, 0, 0 }, // East
-    .{ -1, 0, 0 }, // West
-    .{ 0, 1, 0 }, // Top
-    .{ 0, -1, 0 }, // Bottom
+    .{ 0, 0, -1 },
+    .{ 0, 0, 1 },
+    .{ 1, 0, 0 },
+    .{ -1, 0, 0 },
+    .{ 0, 1, 0 },
+    .{ 0, -1, 0 },
 };
 
-// Two triangles per quad: indices into the 4 corners (0,1,2 and 2,3,0).
 pub const quad_indices = [6]u2{ 0, 1, 2, 2, 3, 0 };
 
 pub fn isNeighborSolid(chunk: *const Chunk, neighbors: NeighborChunks, nx: i32, ny: i32, nz: i32) bool {
     const size: i32 = Chunk.SIZE;
-    // Within this chunk
     if (nx >= 0 and nx < size and ny >= 0 and ny < size and nz >= 0 and nz < size) {
         return chunk.isNeighborSolid(nx, ny, nz);
     }
-    // Check neighbor chunks
     const neighbor_chunk: ?*const Chunk = if (nx < 0) neighbors.west
         else if (nx >= size) neighbors.east
         else if (ny < 0) neighbors.bottom
@@ -83,17 +78,16 @@ pub fn isNeighborSolid(chunk: *const Chunk, neighbors: NeighborChunks, nx: i32, 
         const lz: u4 = @intCast(@mod(nz, size));
         return block.isSolid(nc.getBlock(lx, ly, lz));
     }
-    // No neighbor chunk loaded — treat as air (emit the face)
     return false;
 }
 
 pub const NeighborChunks = struct {
-    north: ?*const Chunk = null, // -Z
-    south: ?*const Chunk = null, // +Z
-    east: ?*const Chunk = null, // +X
-    west: ?*const Chunk = null, // -X
-    top: ?*const Chunk = null, // +Y
-    bottom: ?*const Chunk = null, // -Y
+    north: ?*const Chunk = null,
+    south: ?*const Chunk = null,
+    east: ?*const Chunk = null,
+    west: ?*const Chunk = null,
+    top: ?*const Chunk = null,
+    bottom: ?*const Chunk = null,
 };
 
 pub fn generateMesh(allocator: std.mem.Allocator, chunk: *const Chunk) !IndexedMeshData {
@@ -107,7 +101,6 @@ pub fn generateMeshWithNeighbors(allocator: std.mem.Allocator, chunk: *const Chu
     var indices: std.ArrayList(u32) = .empty;
     errdefer indices.deinit(allocator);
 
-    // Compute lighting once for the entire chunk
     const light_map = light_mod.computeFullLighting(chunk);
 
     for (0..Chunk.SIZE) |yi| {
@@ -137,16 +130,16 @@ pub fn generateMeshWithNeighbors(allocator: std.mem.Allocator, chunk: *const Chu
 
                     for (0..4) |ci| {
                         const corner = corners[ci];
-                        try vertices.append(allocator, .{
-                            .x = @as(u5, bx) + corner[0],
-                            .y = @as(u5, by) + corner[1],
-                            .z = @as(u5, bz) + corner[2],
-                            .face = @intCast(face_idx),
-                            .corner = @intCast(ci),
-                            .ao = face_ao.corners[ci],
-                            .light = light_level,
-                            .tex = @intCast(tex),
-                        });
+                        try vertices.append(allocator, makeVertex(
+                            @as(u5, bx) + corner[0],
+                            @as(u5, by) + corner[1],
+                            @as(u5, bz) + corner[2],
+                            @intCast(face_idx),
+                            @intCast(ci),
+                            face_ao.corners[ci],
+                            light_level,
+                            tex,
+                        ));
                     }
 
                     for (quad_indices) |ci| {
@@ -177,9 +170,7 @@ test "single block produces 24 vertices and 36 indices" {
     chunk.setBlock(8, 8, 8, block.STONE);
     var mesh = try generateMesh(std.testing.allocator, &chunk);
     defer mesh.deinit();
-    // 6 faces * 4 vertices = 24
     try std.testing.expectEqual(@as(usize, 24), mesh.vertices.len);
-    // 6 faces * 6 indices = 36
     try std.testing.expectEqual(@as(usize, 36), mesh.indices.len);
 }
 
@@ -189,11 +180,8 @@ test "two adjacent blocks have fewer vertices (shared face culled)" {
     chunk.setBlock(9, 8, 8, block.STONE);
     var mesh = try generateMesh(std.testing.allocator, &chunk);
     defer mesh.deinit();
-    // 2 blocks * 24 verts - 2 culled faces * 4 verts = 40
     try std.testing.expectEqual(@as(usize, 40), mesh.vertices.len);
-    // 2 blocks * 36 indices - 2 culled faces * 6 indices = 60
     try std.testing.expectEqual(@as(usize, 60), mesh.indices.len);
-    // Fewer than two isolated blocks would produce
     try std.testing.expect(mesh.vertices.len < 48);
 }
 
@@ -206,4 +194,9 @@ test "all indices are valid (less than vertex count)" {
     for (mesh.indices) |idx| {
         try std.testing.expect(idx < mesh.vertices.len);
     }
+}
+
+test "vertex tex field preserves large indices" {
+    const v = makeVertex(0, 0, 0, 0, 0, 0, 0, 500);
+    try std.testing.expectEqual(@as(u32, 500), v.tex_data & 0xFFF);
 }

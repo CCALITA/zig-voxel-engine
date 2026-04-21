@@ -183,7 +183,7 @@ pub fn generateMesh(allocator: std.mem.Allocator, chunk: *const Chunk, neighbors
                     const block_light = light_map.getCombinedLight(bx, by, bz);
 
                     // Emit quad.
-                    const tex: u6 = @intCast(entry - 1); // undo the +1
+                    const tex: u16 = @intCast(entry - 1);
                     const base: u32 = @intCast(vertices.items.len);
                     const corners = face_corners[face_idx];
                     const s_base: u5 = @intCast(slice);
@@ -195,16 +195,16 @@ pub fn generateMesh(allocator: std.mem.Allocator, chunk: *const Chunk, neighbors
                         const s_val: u5 = s_base + c.ds;
                         const pos = buildPos(am, u_val, v_val, s_val);
 
-                        try vertices.append(allocator, .{
-                            .x = pos[0],
-                            .y = pos[1],
-                            .z = pos[2],
-                            .face = @intCast(face_idx),
-                            .corner = @intCast(ci),
-                            .ao = face_ao.corners[ci],
-                            .light = block_light,
-                            .tex = tex,
-                        });
+                        try vertices.append(allocator, mesh_indexed.makeVertex(
+                            pos[0],
+                            pos[1],
+                            pos[2],
+                            @intCast(face_idx),
+                            @intCast(ci),
+                            face_ao.corners[ci],
+                            block_light,
+                            tex,
+                        ));
                     }
 
                     for (quad_indices) |ci| {
