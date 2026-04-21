@@ -11,6 +11,8 @@ pub const UiVertex = extern struct {
     g: f32,
     b: f32,
     a: f32,
+    u: f32,
+    v: f32,
 };
 
 pub const UiPushConstants = extern struct {
@@ -24,6 +26,7 @@ pub fn create(
     render_pass: vk.RenderPass,
     vert_spv: []align(4) const u8,
     frag_spv: []align(4) const u8,
+    descriptor_set_layout: vk.DescriptorSetLayout,
 ) !struct { pipeline: vk.Pipeline, layout: vk.PipelineLayout } {
     const vert_module = try vkd.createShaderModule(device, &.{
         .code_size = vert_spv.len,
@@ -52,6 +55,7 @@ pub fn create(
     const attr_desc = [_]vk.VertexInputAttributeDescription{
         .{ .binding = 0, .location = 0, .format = .r32g32_sfloat, .offset = 0 },
         .{ .binding = 0, .location = 1, .format = .r32g32b32a32_sfloat, .offset = 8 },
+        .{ .binding = 0, .location = 2, .format = .r32g32_sfloat, .offset = 24 },
     };
 
     const vertex_input = vk.PipelineVertexInputStateCreateInfo{
@@ -137,8 +141,10 @@ pub fn create(
         .size = @sizeOf(UiPushConstants),
     }};
 
+    const set_layouts = [_]vk.DescriptorSetLayout{descriptor_set_layout};
     const layout = try vkd.createPipelineLayout(device, &.{
-        .set_layout_count = 0,
+        .set_layout_count = set_layouts.len,
+        .p_set_layouts = &set_layouts,
         .push_constant_range_count = push_range.len,
         .p_push_constant_ranges = &push_range,
     }, null);

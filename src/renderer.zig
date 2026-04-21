@@ -227,6 +227,7 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
         self.render_pass,
         ui_vert_spv,
         ui_frag_spv,
+        self.descriptor_set_layout,
     );
     self.ui_pipeline = ui_pl.pipeline;
     self.ui_pipeline_layout = ui_pl.layout;
@@ -989,6 +990,10 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
     // === UI Overlay Pass (same render pass, different pipeline) ===
     if (self.ui_vertex_count > 0 and self.ui_vertex_buffer != .null_handle) {
         self.vkd.cmdBindPipeline(cmd, .graphics, self.ui_pipeline);
+
+        // Bind texture atlas descriptor set (same atlas as terrain)
+        const ui_desc_sets = [_]vk.DescriptorSet{self.descriptor_set};
+        self.vkd.cmdBindDescriptorSets(cmd, .graphics, self.ui_pipeline_layout, 0, 1, &ui_desc_sets, 0, null);
 
         // Same viewport/scissor
         self.vkd.cmdSetViewport(cmd, 0, 1, &.{vk.Viewport{
