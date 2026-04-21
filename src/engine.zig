@@ -75,6 +75,7 @@ pub const map_item_mod = @import("gameplay/map_item.zig");
 pub const automation_mod = @import("gameplay/automation.zig");
 pub const netherite = @import("gameplay/netherite.zig");
 const ui_pipeline_mod = @import("ui_pipeline.zig");
+const texture_atlas = @import("renderer/texture_atlas.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -1264,8 +1265,7 @@ pub const Engine = struct {
             // Item color indicator (if slot has item)
             const slot = self.inventory.getSlot(@intCast(slot_i));
             if (!slot.isEmpty()) {
-                const item_color = block.getBlockColor(@intCast(@min(slot.item, 119)));
-                count = addQuad(&verts, count, sx + 3, hotbar_y + 3, slot_size - 6, slot_size - 6, item_color[0], item_color[1], item_color[2], 1.0);
+                count = addTexQuad(&verts, count, sx + 3, hotbar_y + 3, slot_size - 6, slot_size - 6, 1.0, 1.0, 1.0, 1.0, @intCast(@min(slot.item, 119)));
             }
         }
 
@@ -1384,8 +1384,7 @@ pub const Engine = struct {
                     // Render item in crafting slot
                     const ci = cy_i * 2 + cx_i;
                     if (!self.craft_grid[ci].isEmpty()) {
-                        const cc = block.getBlockColor(@intCast(@min(self.craft_grid[ci].item, 119)));
-                        count = addQuad(&verts, count, gx + 5, gy + 5, slot_s - 10, slot_s - 10, cc[0], cc[1], cc[2], 1.0);
+                        count = addTexQuad(&verts, count, gx + 5, gy + 5, slot_s - 10, slot_s - 10, 1.0, 1.0, 1.0, 1.0, @intCast(@min(self.craft_grid[ci].item, 119)));
                     }
                 }
             }
@@ -1394,8 +1393,7 @@ pub const Engine = struct {
             count = addQuad(&verts, count, craft_x + 100, craft_y + 18, slot_s + 6, slot_s + 6, 0.25, 0.25, 0.25, 1.0);
             count = addQuad(&verts, count, craft_x + 103, craft_y + 21, slot_s, slot_s, 0.45, 0.45, 0.45, 0.9);
             if (craft_result) |res| {
-                const rc = block.getBlockColor(@intCast(@min(res.result_item, 119)));
-                count = addQuad(&verts, count, craft_x + 108, craft_y + 26, slot_s - 10, slot_s - 10, rc[0], rc[1], rc[2], 1.0);
+                count = addTexQuad(&verts, count, craft_x + 108, craft_y + 26, slot_s - 10, slot_s - 10, 1.0, 1.0, 1.0, 1.0, @intCast(@min(res.result_item, 119)));
             }
             // Arrow
             count = addQuad(&verts, count, craft_x + 88, craft_y + 30, 10, 4, 0.8, 0.8, 0.8, 0.5);
@@ -1444,8 +1442,7 @@ pub const Engine = struct {
                     if (slot_idx < inventory_mod.SLOT_COUNT) {
                         const slot = self.inventory.getSlot(slot_idx);
                         if (!slot.isEmpty()) {
-                            const ic = block.getBlockColor(@intCast(@min(slot.item, 119)));
-                            count = addQuad(&verts, count, sx + 5, sy + 5, slot_s - 10, slot_s - 10, ic[0], ic[1], ic[2], 1.0);
+                            count = addTexQuad(&verts, count, sx + 5, sy + 5, slot_s - 10, slot_s - 10, 1.0, 1.0, 1.0, 1.0, @intCast(@min(slot.item, 119)));
                             if (slot.count > 1) {
                                 count = addQuad(&verts, count, sx + slot_s - 12, sy + slot_s - 12, 10, 10, 1, 1, 1, 0.8);
                             }
@@ -1467,8 +1464,7 @@ pub const Engine = struct {
                 count = addQuad(&verts, count, hx + 2, hb_y + 2, slot_s - 4, slot_s - 4, 0.42, 0.42, 0.42, 0.9);
                 const slot = self.inventory.getSlot(@intCast(hb_i));
                 if (!slot.isEmpty()) {
-                    const ic = block.getBlockColor(@intCast(@min(slot.item, 119)));
-                    count = addQuad(&verts, count, hx + 5, hb_y + 5, slot_s - 10, slot_s - 10, ic[0], ic[1], ic[2], 1.0);
+                    count = addTexQuad(&verts, count, hx + 5, hb_y + 5, slot_s - 10, slot_s - 10, 1.0, 1.0, 1.0, 1.0, @intCast(@min(slot.item, 119)));
                     if (slot.count > 1) {
                         count = addQuad(&verts, count, hx + slot_s - 12, hb_y + slot_s - 12, 10, 10, 1, 1, 1, 0.8);
                     }
@@ -1481,8 +1477,7 @@ pub const Engine = struct {
                 const scale = self.window.handle.getContentScale();
                 const cmx: f32 = @as(f32, @floatCast(cur[0])) * scale[0];
                 const cmy: f32 = @as(f32, @floatCast(cur[1])) * scale[1];
-                const cic = block.getBlockColor(@intCast(@min(self.cursor_item.item, 119)));
-                count = addQuad(&verts, count, cmx + 10, cmy + 10, 28, 28, cic[0], cic[1], cic[2], 0.9);
+                count = addTexQuad(&verts, count, cmx + 10, cmy + 10, 28, 28, 1.0, 1.0, 1.0, 0.9, @intCast(@min(self.cursor_item.item, 119)));
                 count = addQuad(&verts, count, cmx + 10, cmy + 10, 28, 28, 0, 0, 0, 0.15);
             }
         }
@@ -1612,13 +1607,32 @@ pub const Engine = struct {
     fn addQuad(verts: []ui_pipeline_mod.UiVertex, start: u32, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) u32 {
         if (start + 6 > verts.len) return start;
         const V = ui_pipeline_mod.UiVertex;
-        // Two triangles for a quad
-        verts[start + 0] = V{ .pos_x = x, .pos_y = y, .r = r, .g = g, .b = b, .a = a };
-        verts[start + 1] = V{ .pos_x = x + w, .pos_y = y, .r = r, .g = g, .b = b, .a = a };
-        verts[start + 2] = V{ .pos_x = x + w, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a };
-        verts[start + 3] = V{ .pos_x = x, .pos_y = y, .r = r, .g = g, .b = b, .a = a };
-        verts[start + 4] = V{ .pos_x = x + w, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a };
-        verts[start + 5] = V{ .pos_x = x, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a };
+        // Two triangles for a quad (solid color — no texture)
+        verts[start + 0] = V{ .pos_x = x, .pos_y = y, .r = r, .g = g, .b = b, .a = a, .u = -1, .v = -1 };
+        verts[start + 1] = V{ .pos_x = x + w, .pos_y = y, .r = r, .g = g, .b = b, .a = a, .u = -1, .v = -1 };
+        verts[start + 2] = V{ .pos_x = x + w, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a, .u = -1, .v = -1 };
+        verts[start + 3] = V{ .pos_x = x, .pos_y = y, .r = r, .g = g, .b = b, .a = a, .u = -1, .v = -1 };
+        verts[start + 4] = V{ .pos_x = x + w, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a, .u = -1, .v = -1 };
+        verts[start + 5] = V{ .pos_x = x, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a, .u = -1, .v = -1 };
+        return start + 6;
+    }
+
+    /// Draw a textured quad using atlas UVs, with a color tint.
+    fn addTexQuad(verts: []ui_pipeline_mod.UiVertex, start: u32, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32, tex_index: u16) u32 {
+        if (start + 6 > verts.len) return start;
+        const V = ui_pipeline_mod.UiVertex;
+        // corner 3=top-left, 2=top-right, 1=bottom-right, 0=bottom-left
+        const uv_tl = texture_atlas.getUV(tex_index, 3);
+        const uv_tr = texture_atlas.getUV(tex_index, 2);
+        const uv_br = texture_atlas.getUV(tex_index, 1);
+        const uv_bl = texture_atlas.getUV(tex_index, 0);
+        // Two triangles: TL, TR, BR and TL, BR, BL
+        verts[start + 0] = V{ .pos_x = x, .pos_y = y, .r = r, .g = g, .b = b, .a = a, .u = uv_tl[0], .v = uv_tl[1] };
+        verts[start + 1] = V{ .pos_x = x + w, .pos_y = y, .r = r, .g = g, .b = b, .a = a, .u = uv_tr[0], .v = uv_tr[1] };
+        verts[start + 2] = V{ .pos_x = x + w, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a, .u = uv_br[0], .v = uv_br[1] };
+        verts[start + 3] = V{ .pos_x = x, .pos_y = y, .r = r, .g = g, .b = b, .a = a, .u = uv_tl[0], .v = uv_tl[1] };
+        verts[start + 4] = V{ .pos_x = x + w, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a, .u = uv_br[0], .v = uv_br[1] };
+        verts[start + 5] = V{ .pos_x = x, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a, .u = uv_bl[0], .v = uv_bl[1] };
         return start + 6;
     }
 

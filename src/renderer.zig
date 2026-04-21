@@ -225,6 +225,7 @@ pub fn init(allocator: std.mem.Allocator, window: *zglfw.Window) !Self {
         self.device,
         self.vkd,
         self.render_pass,
+        self.descriptor_set_layout,
         ui_vert_spv,
         ui_frag_spv,
     );
@@ -1019,6 +1020,8 @@ fn recordCommandBuffer(self: *Self, cmd: vk.CommandBuffer, image_index: u32) !vo
         );
 
         // Bind UI vertex buffer and draw
+        const ui_desc_sets = [_]vk.DescriptorSet{self.descriptor_set};
+        self.vkd.cmdBindDescriptorSets(cmd, .graphics, self.ui_pipeline_layout, 0, 1, &ui_desc_sets, 0, null);
         const ui_offsets = [_]vk.DeviceSize{0};
         const ui_bufs = [_]vk.Buffer{self.ui_vertex_buffer};
         self.vkd.cmdBindVertexBuffers(cmd, 0, 1, &ui_bufs, &ui_offsets);
