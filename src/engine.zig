@@ -1640,9 +1640,10 @@ pub const Engine = struct {
     }
 
     fn getCraftResult(self: *const Engine) ?crafting_mod.Recipe {
+        const g = self.craft_grid;
         const grid: [3][3]crafting_mod.ItemId = .{
-            .{ self.craft_grid[0].item, self.craft_grid[1].item, 0 },
-            .{ self.craft_grid[2].item, self.craft_grid[3].item, 0 },
+            .{ if (g[0].count > 0) g[0].item else 0, if (g[1].count > 0) g[1].item else 0, 0 },
+            .{ if (g[2].count > 0) g[2].item else 0, if (g[3].count > 0) g[3].item else 0, 0 },
             .{ 0, 0, 0 },
         };
         return self.crafting_registry.findMatch(grid);
@@ -2562,12 +2563,14 @@ pub const Engine = struct {
         }
 
         const slot = self.inventory.getSlot(self.selected_slot);
-        const block_id: block.BlockId = if (!slot.isEmpty())
-            @intCast(slot.item)
-        else
-            block.STONE;
+        if (slot.isEmpty()) return;
+        if (slot.item > 255) return;
+        const block_id: block.BlockId = @intCast(slot.item);
+        if (block_id == block.AIR) return;
 
         if (!self.setWorldBlock(wx, wy, wz, block_id)) return;
+
+        _ = self.inventory.removeItem(self.selected_slot, 1);
 
         // Scoreboard: track block placed
         self.stat_tracker.increment(.blocks_placed, 1);
