@@ -85,6 +85,28 @@ const recipes_redstone = @import("gameplay/recipes_redstone.zig");
 const recipes_decorative = @import("gameplay/recipes_decorative.zig");
 const recipes_transport = @import("gameplay/recipes_transport.zig");
 const recipes_food = @import("gameplay/recipes_food.zig");
+const recipes_wood = @import("gameplay/recipes_wood_variants.zig");
+const recipes_colored = @import("gameplay/recipes_colored.zig");
+const recipes_misc = @import("gameplay/recipes_misc.zig");
+const recipes_special = @import("gameplay/recipes_special.zig");
+const item_registry_mod = @import("gameplay/item_registry.zig");
+const item_slot_mod = @import("gameplay/item_slot.zig");
+const enchant_effects = @import("gameplay/enchantment_effects.zig");
+const armor_equip_mod = @import("gameplay/armor_equip.zig");
+const recipe_discovery_mod = @import("gameplay/recipe_discovery.zig");
+const smelting_recipes_mod = @import("gameplay/smelting_recipes.zig");
+const station_ui_mod = @import("gameplay/station_ui.zig");
+const anvil_ui_mod = @import("gameplay/anvil_ui.zig");
+const stonecutter_ui_mod = @import("gameplay/stonecutter_ui.zig");
+const brewing_ui_mod = @import("gameplay/brewing_ui.zig");
+const furnace_ui_mod = @import("gameplay/furnace_ui.zig");
+const smithing_ui_mod = @import("gameplay/smithing_ui.zig");
+const grindstone_ui_mod = @import("gameplay/grindstone_ui.zig");
+const loom_ui_mod = @import("gameplay/loom_ui.zig");
+const campfire_ui_mod = @import("gameplay/campfire_ui.zig");
+const brew_modifiers = @import("gameplay/recipes_brewing_modifiers.zig");
+const block_variants_mod = @import("world/block_variants.zig");
+const block_shapes_mod = @import("world/block_shapes.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -249,6 +271,11 @@ pub const Engine = struct {
     // Taming: track tamed entities
     tamed_count: u8 = 0,
     copper_tick_timer: f32 = 0.0,
+
+    // Recipe discovery tracking
+    recipe_book: recipe_discovery_mod.RecipeBook = recipe_discovery_mod.RecipeBook.init(),
+    // Armor equip state
+    armor_equip: armor_equip_mod.ArmorEquipState = armor_equip_mod.ArmorEquipState.init(),
     copper_tick_count: u32 = 0,
 
     // Inventory screen (E key)
@@ -1697,6 +1724,9 @@ pub const Engine = struct {
             if (findInRecipeSet(grid, &recipes_decorative.recipes)) |r| return r;
             if (findInRecipeSet(grid, &recipes_transport.recipes)) |r| return r;
             if (findInRecipeSet(grid, &recipes_food.recipes)) |r| return r;
+            if (findInRecipeSet(grid, &recipes_wood.recipes)) |r| return r;
+            if (findInRecipeSet(grid, &recipes_colored.recipes)) |r| return r;
+            if (findInRecipeSet(grid, &recipes_misc.recipes)) |r| return r;
             return null;
         }
         // 2x2 mode
