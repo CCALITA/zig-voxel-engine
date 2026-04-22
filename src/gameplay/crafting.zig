@@ -13,8 +13,8 @@ const OAK_PLANKS: ItemId = 5;
 
 /// Stick is a non-block item, assigned the first ID above the block range.
 pub const STICK: ItemId = 256;
-/// Crafting table item.
-pub const CRAFTING_TABLE: ItemId = 257;
+/// Crafting table — uses block ID so it can be placed in the world.
+pub const CRAFTING_TABLE: ItemId = 110;
 
 pub const Recipe = struct {
     pattern: [3][3]ItemId,

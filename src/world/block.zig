@@ -155,6 +155,7 @@ pub const CARTOGRAPHY_TABLE: BlockId = 106;
 pub const COMPOSTER: BlockId = 107;
 pub const LECTERN: BlockId = 108;
 pub const ENDER_CHEST: BlockId = 109;
+pub const CRAFTING_TABLE_BLOCK: BlockId = 110;
 
 // Texture atlas indices (placeholder -- will map to real textures later)
 const T_STONE: u16 = 0;
@@ -425,6 +426,20 @@ pub const BLOCKS = [_]BlockDef{
     .{ .name = "exposed_copper", .tex = allFaces(T_EXPOSED_COPPER) }, // 96
     .{ .name = "weathered_copper", .tex = allFaces(T_WEATHERED_COPPER) }, // 97
     .{ .name = "oxidized_copper", .tex = allFaces(T_OXIDIZED_COPPER) }, // 98
+
+    // -- Workstation / interactive blocks --
+    .{ .name = "smoker", .tex = topBottomSide(T_FURNACE_TOP, T_FURNACE_TOP, T_FURNACE_SIDE) }, // 99
+    .{ .name = "blast_furnace", .tex = topBottomSide(T_FURNACE_TOP, T_FURNACE_TOP, T_FURNACE_SIDE) }, // 100
+    .{ .name = "barrel", .tex = topBottomSide(T_PLANKS, T_PLANKS, T_PLANKS) }, // 101
+    .{ .name = "grindstone", .tex = allFaces(T_STONE) }, // 102
+    .{ .name = "stonecutter", .tex = allFaces(T_STONE) }, // 103
+    .{ .name = "smithing_table", .tex = topBottomSide(T_IRON_ORE, T_PLANKS, T_PLANKS) }, // 104
+    .{ .name = "loom", .tex = topBottomSide(T_PLANKS, T_PLANKS, T_PLANKS) }, // 105
+    .{ .name = "cartography_table", .tex = topBottomSide(T_PLANKS, T_PLANKS, T_PLANKS) }, // 106
+    .{ .name = "composter", .tex = allFaces(T_PLANKS) }, // 107
+    .{ .name = "lectern", .tex = allFaces(T_PLANKS) }, // 108
+    .{ .name = "ender_chest", .tex = topBottomSide(T_OBSIDIAN, T_OBSIDIAN, T_OBSIDIAN) }, // 109
+    .{ .name = "crafting_table", .tex = topBottomSide(T_PLANKS, T_PLANKS, T_PLANKS) }, // 110
 };
 
 pub fn get(id: BlockId) BlockDef {
@@ -636,5 +651,5 @@ test "brewing stand is non-solid" {
 }
 
 test "last block id matches registry length" {
-    try std.testing.expectEqual(@as(usize, OXIDIZED_COPPER + 1), BLOCKS.len);
+    try std.testing.expectEqual(@as(usize, CRAFTING_TABLE_BLOCK + 1), BLOCKS.len);
 }
