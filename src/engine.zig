@@ -77,6 +77,14 @@ pub const netherite = @import("gameplay/netherite.zig");
 const ui_pipeline_mod = @import("ui_pipeline.zig");
 const texture_atlas_mod = @import("renderer/texture_atlas.zig");
 const bitmap_font = @import("renderer/bitmap_font.zig");
+const crafting_grid_mod = @import("gameplay/crafting_grid.zig");
+const recipe_matching_mod = @import("gameplay/recipe_matching.zig");
+const recipes_tools = @import("gameplay/recipes_tools.zig");
+const recipes_armor = @import("gameplay/recipes_armor.zig");
+const recipes_redstone = @import("gameplay/recipes_redstone.zig");
+const recipes_decorative = @import("gameplay/recipes_decorative.zig");
+const recipes_transport = @import("gameplay/recipes_transport.zig");
+const recipes_food = @import("gameplay/recipes_food.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -252,6 +260,9 @@ pub const Engine = struct {
     last_inv_right_click: bool = false,
     // 2x2 crafting grid (player inventory crafting)
     craft_grid: [4]inventory_mod.Slot = [_]inventory_mod.Slot{inventory_mod.Slot.empty} ** 4,
+    // 3x3 crafting grid (crafting table)
+    craft_grid_3x3: crafting_grid_mod.CraftingGrid = crafting_grid_mod.CraftingGrid.init(),
+    crafting_table_open: bool = false,
 
     const FurnaceEntry = struct {
         x: i32,
@@ -1380,40 +1391,59 @@ pub const Engine = struct {
             count = addQuad(&verts, count, inv_x, inv_y, inv_w, 30, 0.40, 0.40, 0.40, 1.0);
             count = addQuad(&verts, count, inv_x + 10, inv_y + 10, 80, 10, 0.9, 0.9, 0.9, 0.6);
 
-            // === Crafting grid (2x2) — top right ===
-            const craft_x = inv_x + inv_w - 120;
+            // === Crafting grid — 3x3 if crafting table open, else 2x2 ===
+            const craft_rows: u32 = if (self.crafting_table_open) 3 else 2;
+            const craft_cols: u32 = if (self.crafting_table_open) 3 else 2;
+            const craft_grid_w = @as(f32, @floatFromInt(craft_cols)) * (slot_s + slot_pad);
+            const craft_x = inv_x + inv_w - craft_grid_w - 80;
             const craft_y = inv_y + 44;
-            count = addQuad(&verts, count, craft_x - 6, craft_y - 4, 100, 3, 0.7, 0.5, 0.2, 0.8);
+            // Label bar
+            count = addQuad(&verts, count, craft_x - 6, craft_y - 4, craft_grid_w + 12, 3, 0.7, 0.5, 0.2, 0.8);
             var cy_i: u32 = 0;
-            while (cy_i < 2) : (cy_i += 1) {
+            while (cy_i < craft_rows) : (cy_i += 1) {
                 var cx_i: u32 = 0;
-                while (cx_i < 2) : (cx_i += 1) {
+                while (cx_i < craft_cols) : (cx_i += 1) {
                     const gx = craft_x + @as(f32, @floatFromInt(cx_i)) * (slot_s + slot_pad);
                     const gy = craft_y + @as(f32, @floatFromInt(cy_i)) * (slot_s + slot_pad);
                     count = addQuad(&verts, count, gx, gy, slot_s, slot_s, 0.30, 0.30, 0.30, 1.0);
                     count = addQuad(&verts, count, gx + 2, gy + 2, slot_s - 4, slot_s - 4, 0.42, 0.42, 0.42, 0.9);
-                    // Render item in crafting slot
-                    const ci = cy_i * 2 + cx_i;
-                    if (!self.craft_grid[ci].isEmpty()) {
-                        const tid: u16 = @intCast(@min(self.craft_grid[ci].item, 119));
-                        const cuv0 = texture_atlas_mod.getUV(tid, 3);
-                        const cuv1 = texture_atlas_mod.getUV(tid, 1);
-                        count = addTexQuad(&verts, count, gx + 5, gy + 5, slot_s - 10, slot_s - 10, 1, 1, 1, 1, cuv0[0], cuv0[1], cuv1[0], cuv1[1]);
+                    // Render item in grid slot
+                    if (self.crafting_table_open) {
+                        const ci3 = cy_i * 3 + cx_i;
+                        const slot3 = self.craft_grid_3x3.slots[ci3];
+                        if (!slot3.isEmpty()) {
+                            const tid3: u16 = @intCast(@min(slot3.item, 119));
+                            const uv03 = texture_atlas_mod.getUV(tid3, 3);
+                            const uv13 = texture_atlas_mod.getUV(tid3, 1);
+                            count = addTexQuad(&verts, count, gx + 5, gy + 5, slot_s - 10, slot_s - 10, 1, 1, 1, 1, uv03[0], uv03[1], uv13[0], uv13[1]);
+                            if (slot3.count > 1)
+                                count = drawNumberShadowed(&verts, count, gx + slot_s - 16, gy + slot_s - 12, slot3.count, 2.0, 1, 1, 1);
+                        }
+                    } else {
+                        const ci2 = cy_i * 2 + cx_i;
+                        if (!self.craft_grid[ci2].isEmpty()) {
+                            const tid2: u16 = @intCast(@min(self.craft_grid[ci2].item, 119));
+                            const uv02 = texture_atlas_mod.getUV(tid2, 3);
+                            const uv12 = texture_atlas_mod.getUV(tid2, 1);
+                            count = addTexQuad(&verts, count, gx + 5, gy + 5, slot_s - 10, slot_s - 10, 1, 1, 1, 1, uv02[0], uv02[1], uv12[0], uv12[1]);
+                        }
                     }
                 }
             }
             // Crafting output slot
+            const out_offset_x = craft_grid_w + 20;
+            const out_offset_y = @as(f32, @floatFromInt(craft_rows)) * (slot_s + slot_pad) / 2.0 - slot_s / 2.0;
             const craft_result = self.getCraftResult();
-            count = addQuad(&verts, count, craft_x + 100, craft_y + 18, slot_s + 6, slot_s + 6, 0.25, 0.25, 0.25, 1.0);
-            count = addQuad(&verts, count, craft_x + 103, craft_y + 21, slot_s, slot_s, 0.45, 0.45, 0.45, 0.9);
+            count = addQuad(&verts, count, craft_x + out_offset_x, craft_y + out_offset_y - 3, slot_s + 6, slot_s + 6, 0.25, 0.25, 0.25, 1.0);
+            count = addQuad(&verts, count, craft_x + out_offset_x + 3, craft_y + out_offset_y, slot_s, slot_s, 0.45, 0.45, 0.45, 0.9);
             if (craft_result) |res| {
                 const rtid: u16 = @intCast(@min(res.result_item, 119));
                 const ruv0 = texture_atlas_mod.getUV(rtid, 3);
                 const ruv1 = texture_atlas_mod.getUV(rtid, 1);
-                count = addTexQuad(&verts, count, craft_x + 108, craft_y + 26, slot_s - 10, slot_s - 10, 1, 1, 1, 1, ruv0[0], ruv0[1], ruv1[0], ruv1[1]);
+                count = addTexQuad(&verts, count, craft_x + out_offset_x + 8, craft_y + out_offset_y + 5, slot_s - 10, slot_s - 10, 1, 1, 1, 1, ruv0[0], ruv0[1], ruv1[0], ruv1[1]);
             }
-            // Arrow
-            count = addQuad(&verts, count, craft_x + 88, craft_y + 30, 10, 4, 0.8, 0.8, 0.8, 0.5);
+            // Arrow between grid and output
+            count = addQuad(&verts, count, craft_x + out_offset_x - 12, craft_y + out_offset_y + slot_s / 2.0 - 2, 10, 4, 0.8, 0.8, 0.8, 0.5);
 
             // === Armor slots (left column) ===
             const armor_x = inv_x + 14;
@@ -1538,20 +1568,33 @@ pub const Engine = struct {
         const grid_x = inv_x + 12;
         const grid_y = inv_y + 240;
 
-        // Check crafting grid (2x2) clicks
-        const craft_x = inv_x + inv_w - 120;
+        // Check crafting grid clicks (2x2 or 3x3 depending on mode)
+        const craft_rows: u32 = if (self.crafting_table_open) 3 else 2;
+        const craft_cols: u32 = if (self.crafting_table_open) 3 else 2;
+        const craft_grid_w = @as(f32, @floatFromInt(craft_cols)) * (slot_s + slot_pad);
+        const craft_x = inv_x + inv_w - craft_grid_w - 80;
         const craft_y = inv_y + 44;
         var cri: u32 = 0;
-        while (cri < 2) : (cri += 1) {
+        while (cri < craft_rows) : (cri += 1) {
             var cci: u32 = 0;
-            while (cci < 2) : (cci += 1) {
+            while (cci < craft_cols) : (cci += 1) {
                 const gx = craft_x + @as(f32, @floatFromInt(cci)) * (slot_s + slot_pad);
                 const gy = craft_y + @as(f32, @floatFromInt(cri)) * (slot_s + slot_pad);
                 if (mx >= gx and mx < gx + slot_s and my >= gy and my < gy + slot_s) {
-                    if (is_right) {
-                        self.placeOneIntoCraftSlot(@intCast(cri * 2 + cci));
+                    if (self.crafting_table_open) {
+                        const idx3 = @as(u8, @intCast(cri * 3 + cci));
+                        if (is_right) {
+                            self.cursor_item = self.craft_grid_3x3.rightClickSlot(idx3, self.cursor_item);
+                        } else {
+                            self.cursor_item = self.craft_grid_3x3.leftClickSlot(idx3, self.cursor_item);
+                        }
                     } else {
-                        self.swapCursorWithCraftSlot(@intCast(cri * 2 + cci));
+                        const idx2 = @as(u8, @intCast(cri * 2 + cci));
+                        if (is_right) {
+                            self.placeOneIntoCraftSlot(idx2);
+                        } else {
+                            self.swapCursorWithCraftSlot(idx2);
+                        }
                     }
                     return;
                 }
@@ -1559,8 +1602,10 @@ pub const Engine = struct {
         }
 
         // Check crafting output slot click
-        const out_x = craft_x + 100;
-        const out_y = craft_y + 18;
+        const out_offset_x = craft_grid_w + 20;
+        const out_offset_y = @as(f32, @floatFromInt(craft_rows)) * (slot_s + slot_pad) / 2.0 - slot_s / 2.0;
+        const out_x = craft_x + out_offset_x;
+        const out_y = craft_y + out_offset_y;
         if (mx >= out_x and mx < out_x + slot_s + 6 and my >= out_y and my < out_y + slot_s + 6) {
             self.tryCraft();
             return;
@@ -1641,6 +1686,20 @@ pub const Engine = struct {
     }
 
     fn getCraftResult(self: *const Engine) ?crafting_mod.Recipe {
+        if (self.crafting_table_open) {
+            const grid = self.craft_grid_3x3.getRecipeGrid();
+            // Try old registry first
+            if (self.crafting_registry.findMatch(grid)) |r| return r;
+            // Try all new recipe modules — convert ShapedRecipe to crafting.Recipe inline
+            if (findInRecipeSet(grid, &recipes_tools.recipes)) |r| return r;
+            if (findInRecipeSet(grid, &recipes_armor.recipes)) |r| return r;
+            if (findInRecipeSet(grid, &recipes_redstone.recipes)) |r| return r;
+            if (findInRecipeSet(grid, &recipes_decorative.recipes)) |r| return r;
+            if (findInRecipeSet(grid, &recipes_transport.recipes)) |r| return r;
+            if (findInRecipeSet(grid, &recipes_food.recipes)) |r| return r;
+            return null;
+        }
+        // 2x2 mode
         const g = self.craft_grid;
         const grid: [3][3]crafting_mod.ItemId = .{
             .{ if (g[0].count > 0) g[0].item else 0, if (g[1].count > 0) g[1].item else 0, 0 },
@@ -1650,16 +1709,39 @@ pub const Engine = struct {
         return self.crafting_registry.findMatch(grid);
     }
 
+    fn findInRecipeSet(grid: [3][3]u16, recipes: anytype) ?crafting_mod.Recipe {
+        const normalized = recipe_matching_mod.normalizeGrid(grid);
+        const mirrored = recipe_matching_mod.mirrorGrid(normalized);
+        for (recipes) |recipe| {
+            const rn = recipe_matching_mod.normalizeGrid(recipe.pattern);
+            if (gridsEqual(normalized, rn) or gridsEqual(mirrored, rn))
+                return .{ .pattern = recipe.pattern, .result_item = recipe.result_item, .result_count = recipe.result_count };
+        }
+        return null;
+    }
+
+    fn gridsEqual(a: [3][3]u16, b: [3][3]u16) bool {
+        for (0..3) |r| for (0..3) |c| {
+            if (a[r][c] != b[r][c]) return false;
+        };
+        return true;
+    }
+
     fn tryCraft(self: *Engine) void {
         const result = self.getCraftResult() orelse return;
-        // Only consume from slots that the recipe pattern requires (non-zero)
-        const pattern = result.pattern;
-        const slot_map = [4][2]usize{ .{ 0, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 1, 1 } };
-        for (slot_map, 0..) |rc, i| {
-            if (pattern[rc[0]][rc[1]] != 0) {
-                if (!self.craft_grid[i].isEmpty()) {
-                    self.craft_grid[i].count -= 1;
-                    if (self.craft_grid[i].count == 0) self.craft_grid[i] = inventory_mod.Slot.empty;
+        if (self.crafting_table_open) {
+            // Consume from 3x3 grid
+            self.craft_grid_3x3.consumeForPattern(result.pattern);
+        } else {
+            // Consume from 2x2 grid
+            const pattern = result.pattern;
+            const slot_map = [4][2]usize{ .{ 0, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 1, 1 } };
+            for (slot_map, 0..) |rc, i| {
+                if (pattern[rc[0]][rc[1]] != 0) {
+                    if (!self.craft_grid[i].isEmpty()) {
+                        self.craft_grid[i].count -= 1;
+                        if (self.craft_grid[i].count == 0) self.craft_grid[i] = inventory_mod.Slot.empty;
+                    }
                 }
             }
         }
@@ -1685,6 +1767,8 @@ pub const Engine = struct {
                 slot.* = inventory_mod.Slot.empty;
             }
         }
+        self.craft_grid_3x3.returnAllToInventory(&self.inventory.slots);
+        self.crafting_table_open = false;
     }
 
     fn placeOneIntoSlot(self: *Engine, slot_idx: u8) void {
@@ -2128,6 +2212,7 @@ pub const Engine = struct {
                     self.interactFurnace(hit.bx, hit.by, hit.bz);
                 } else if (target_bid == block.CRAFTING_TABLE_BLOCK) {
                     self.inventory_open = true;
+                    self.crafting_table_open = true;
                     self.window.handle.setInputMode(.cursor, .normal) catch {};
                 } else if (target_bid == ENCHANTING_TABLE_BLOCK_ID) {
                     self.interactEnchantingTable();
