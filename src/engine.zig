@@ -249,6 +249,7 @@ pub const Engine = struct {
     hand_swing_timer: f32 = 0.0,
     cursor_item: inventory_mod.Slot = inventory_mod.Slot.empty,
     last_inv_click: bool = false,
+    last_inv_right_click: bool = false,
     // 2x2 crafting grid (player inventory crafting)
     craft_grid: [4]inventory_mod.Slot = [_]inventory_mod.Slot{inventory_mod.Slot.empty} ** 4,
 
@@ -1511,10 +1512,14 @@ pub const Engine = struct {
 
     fn handleInventoryClick(self: *Engine) void {
         const left_pressed = self.window.handle.getMouseButton(.left) == .press;
+        const right_pressed = self.window.handle.getMouseButton(.right) == .press;
         const left_just = left_pressed and !self.last_inv_click;
+        const right_just = right_pressed and !self.last_inv_right_click;
         self.last_inv_click = left_pressed;
+        self.last_inv_right_click = right_pressed;
 
-        if (!left_just) return;
+        if (!left_just and !right_just) return;
+        const is_right = right_just and !left_just;
 
         const cursor = self.window.handle.getCursorPos();
         const scale = self.window.handle.getContentScale();
@@ -1542,7 +1547,11 @@ pub const Engine = struct {
                 const gx = craft_x + @as(f32, @floatFromInt(cci)) * (slot_s + slot_pad);
                 const gy = craft_y + @as(f32, @floatFromInt(cri)) * (slot_s + slot_pad);
                 if (mx >= gx and mx < gx + slot_s and my >= gy and my < gy + slot_s) {
-                    self.swapCursorWithCraftSlot(@intCast(cri * 2 + cci));
+                    if (is_right) {
+                        self.placeOneIntoCraftSlot(@intCast(cri * 2 + cci));
+                    } else {
+                        self.swapCursorWithCraftSlot(@intCast(cri * 2 + cci));
+                    }
                     return;
                 }
             }
@@ -1565,7 +1574,11 @@ pub const Engine = struct {
                 const sy = grid_y + @as(f32, @floatFromInt(row)) * (slot_s + slot_pad);
                 if (mx >= sx and mx < sx + slot_s and my >= sy and my < sy + slot_s) {
                     const idx: u8 = @intCast(9 + row * 9 + col);
-                    self.swapCursorWithSlot(idx);
+                    if (is_right) {
+                        self.placeOneIntoSlot(idx);
+                    } else {
+                        self.swapCursorWithSlot(idx);
+                    }
                     return;
                 }
             }
@@ -1577,7 +1590,11 @@ pub const Engine = struct {
         while (hb_i < 9) : (hb_i += 1) {
             const hx = grid_x + @as(f32, @floatFromInt(hb_i)) * (slot_s + slot_pad);
             if (mx >= hx and mx < hx + slot_s and my >= hb_y and my < hb_y + slot_s) {
-                self.swapCursorWithSlot(@intCast(hb_i));
+                if (is_right) {
+                    self.placeOneIntoSlot(@intCast(hb_i));
+                } else {
+                    self.swapCursorWithSlot(@intCast(hb_i));
+                }
                 return;
             }
         }
@@ -1587,7 +1604,6 @@ pub const Engine = struct {
         if (slot_idx >= inventory_mod.SLOT_COUNT) return;
         const slot_val = self.inventory.getSlot(slot_idx);
 
-        // Same item type: stack cursor onto slot
         if (!self.cursor_item.isEmpty() and !slot_val.isEmpty() and self.cursor_item.item == slot_val.item) {
             const space = inventory_mod.STACK_MAX - slot_val.count;
             if (space > 0) {
@@ -1595,11 +1611,11 @@ pub const Engine = struct {
                 self.inventory.slots[slot_idx].count += to_add;
                 self.cursor_item.count -= to_add;
                 if (self.cursor_item.count == 0) self.cursor_item = inventory_mod.Slot.empty;
+                return;
             }
-            return;
+            // Both full stacks of same type — swap (no-op but consistent)
         }
 
-        // Different items or one empty: swap
         self.inventory.slots[slot_idx] = self.cursor_item;
         self.cursor_item = slot_val;
     }
@@ -1615,8 +1631,8 @@ pub const Engine = struct {
                 self.craft_grid[craft_idx].count += to_add;
                 self.cursor_item.count -= to_add;
                 if (self.cursor_item.count == 0) self.cursor_item = inventory_mod.Slot.empty;
+                return;
             }
-            return;
         }
 
         self.craft_grid[craft_idx] = self.cursor_item;
@@ -1662,6 +1678,38 @@ pub const Engine = struct {
                 slot.* = inventory_mod.Slot.empty;
             }
         }
+    }
+
+    fn placeOneIntoSlot(self: *Engine, slot_idx: u8) void {
+        if (self.cursor_item.isEmpty()) return;
+        if (slot_idx >= inventory_mod.SLOT_COUNT) return;
+        const slot = &self.inventory.slots[slot_idx];
+        if (slot.isEmpty()) {
+            slot.item = self.cursor_item.item;
+            slot.count = 1;
+        } else if (slot.item == self.cursor_item.item and slot.count < inventory_mod.STACK_MAX) {
+            slot.count += 1;
+        } else {
+            return;
+        }
+        self.cursor_item.count -= 1;
+        if (self.cursor_item.count == 0) self.cursor_item = inventory_mod.Slot.empty;
+    }
+
+    fn placeOneIntoCraftSlot(self: *Engine, craft_idx: u8) void {
+        if (self.cursor_item.isEmpty()) return;
+        if (craft_idx >= 4) return;
+        const slot = &self.craft_grid[craft_idx];
+        if (slot.isEmpty()) {
+            slot.item = self.cursor_item.item;
+            slot.count = 1;
+        } else if (slot.item == self.cursor_item.item and slot.count < inventory_mod.STACK_MAX) {
+            slot.count += 1;
+        } else {
+            return;
+        }
+        self.cursor_item.count -= 1;
+        if (self.cursor_item.count == 0) self.cursor_item = inventory_mod.Slot.empty;
     }
 
     fn addQuad(verts: []ui_pipeline_mod.UiVertex, start: u32, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) u32 {
