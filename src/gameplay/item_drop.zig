@@ -6,7 +6,7 @@ const std = @import("std");
 
 pub const DESPAWN_TIME: f32 = 300.0; // 5 minutes
 pub const PICKUP_DELAY: f32 = 0.5; // can't pick up immediately after dropping
-pub const PICKUP_RANGE: f32 = 1.5;
+pub const PICKUP_RANGE: f32 = 2.5;
 
 const GRAVITY: f32 = 20.0;
 const SPAWN_SPEED: f32 = 2.0; // horizontal spread when spawned
@@ -112,8 +112,16 @@ pub const ItemDropManager = struct {
                 const dz = drop.z - player_z;
                 const dist_sq = dx * dx + dy * dy + dz * dz;
                 if (dist_sq <= PICKUP_RANGE * PICKUP_RANGE) {
-                    try picked_up.append(self.allocator, drop.*);
-                    drop.active = false;
+                    if (dist_sq <= 1.0) {
+                        try picked_up.append(self.allocator, drop.*);
+                        drop.active = false;
+                    } else {
+                        const inv_dist = 1.0 / @max(@sqrt(dist_sq), 0.01);
+                        const magnet: f32 = 5.0;
+                        drop.vx = -dx * inv_dist * magnet;
+                        drop.vy = -dy * inv_dist * magnet;
+                        drop.vz = -dz * inv_dist * magnet;
+                    }
                 }
             }
         }
