@@ -638,8 +638,9 @@ pub const Engine = struct {
                 self.advancements.checkCriteria(.enter_dimension, 2);
             }
 
-            // Taming: right-click passive mob with bone (wolf) triggers taming attempt
-            if (self.last_right_click and !self.chat_open) {
+            // Taming: right-click passive mob with bone (wolf) — one-shot per click
+            const right_now = self.window.handle.getMouseButton(.right) == .press;
+            if (right_now and !self.last_right_click and !self.chat_open and !self.inventory_open) {
                 const held = self.inventory.getSlot(self.selected_slot).item;
                 for (self.mob_manager.entities.items) |*mob| {
                     if (!mob.alive or mob.entity_type.isHostile()) continue;
@@ -1651,10 +1652,15 @@ pub const Engine = struct {
 
     fn tryCraft(self: *Engine) void {
         const result = self.getCraftResult() orelse return;
-        for (&self.craft_grid) |*slot| {
-            if (!slot.isEmpty()) {
-                slot.count -= 1;
-                if (slot.count == 0) slot.* = inventory_mod.Slot.empty;
+        // Only consume from slots that the recipe pattern requires (non-zero)
+        const pattern = result.pattern;
+        const slot_map = [4][2]usize{ .{ 0, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 1, 1 } };
+        for (slot_map, 0..) |rc, i| {
+            if (pattern[rc[0]][rc[1]] != 0) {
+                if (!self.craft_grid[i].isEmpty()) {
+                    self.craft_grid[i].count -= 1;
+                    if (self.craft_grid[i].count == 0) self.craft_grid[i] = inventory_mod.Slot.empty;
+                }
             }
         }
         if (self.cursor_item.isEmpty()) {
@@ -2381,7 +2387,7 @@ pub const Engine = struct {
                 if (slot.item == req.item and slot.count > 0) {
                     const take = @min(slot.count, @as(u8, @intCast(remaining)));
                     slot.count -= take;
-                    if (slot.count == 0) slot.item = 0;
+                    if (slot.count == 0) slot.* = inventory_mod.Slot.empty;
                     remaining -= take;
                 }
             }
@@ -2468,7 +2474,7 @@ pub const Engine = struct {
                 if (slot.item == enchant_table_mod.LAPIS_ITEM_ID and slot.count > 0) {
                     const take = @min(slot.count, lapis_to_remove);
                     slot.count -= take;
-                    if (slot.count == 0) slot.item = 0;
+                    if (slot.count == 0) slot.* = inventory_mod.Slot.empty;
                     lapis_to_remove -= take;
                 }
             }
@@ -2564,7 +2570,7 @@ pub const Engine = struct {
 
         const slot = self.inventory.getSlot(self.selected_slot);
         if (slot.isEmpty()) return;
-        if (slot.item > 255) return;
+        if (slot.item >= block.BLOCKS.len) return;
         const block_id: block.BlockId = @intCast(slot.item);
         if (block_id == block.AIR) return;
 
