@@ -76,6 +76,7 @@ pub const automation_mod = @import("gameplay/automation.zig");
 pub const netherite = @import("gameplay/netherite.zig");
 const ui_pipeline_mod = @import("ui_pipeline.zig");
 const texture_atlas_mod = @import("renderer/texture_atlas.zig");
+const bitmap_font = @import("renderer/bitmap_font.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
@@ -1180,7 +1181,7 @@ pub const Engine = struct {
 
     fn generateAndUploadUi(self: *Engine) void {
         const V = ui_pipeline_mod.UiVertex;
-        var verts: [2048]V = undefined;
+        var verts: [8192]V = undefined;
         var count: u32 = 0;
 
         const sw: f32 = @floatFromInt(self.renderer.swapchain_extent.width);
@@ -1198,8 +1199,8 @@ pub const Engine = struct {
         count = addQuad(&verts, count, cx - ch_len, cy - ch_thick / 2, ch_len * 2, ch_thick, 1, 1, 1, 0.9);
         count = addQuad(&verts, count, cx - ch_thick / 2, cy - ch_len, ch_thick, ch_len * 2, 1, 1, 1, 0.9);
 
-        // === HEALTH (individual heart squares, bottom-left) ===
-        const hearts_y: f32 = sh - 52.0;
+        // === HEALTH (individual heart squares) ===
+        const hearts_y: f32 = sh - 80.0;
         const hearts_x: f32 = sw / 2.0 - 100.0;
         const heart_size: f32 = 9.0;
         const heart_gap: f32 = 2.0;
@@ -1216,8 +1217,8 @@ pub const Engine = struct {
             }
         }
 
-        // === HUNGER (individual drumstick squares, right of health) ===
-        const hunger_y: f32 = sh - 52.0;
+        // === HUNGER (individual drumstick squares) ===
+        const hunger_y: f32 = sh - 80.0;
         const hunger_x: f32 = sw / 2.0 + 2.0;
         const total_drumsticks: u32 = 10;
         const filled_drumsticks: u32 = self.player_stats.getHungerDrumsticks();
@@ -1237,7 +1238,7 @@ pub const Engine = struct {
         const xp_bar_w: f32 = 182.0;
         const xp_bar_h: f32 = 5.0;
         const xp_bar_x = (sw - xp_bar_w) / 2.0;
-        const xp_bar_y = sh - 38.0;
+        const xp_bar_y = sh - 56.0;
         // Background
         count = addQuad(&verts, count, xp_bar_x, xp_bar_y, xp_bar_w, xp_bar_h, 0.0, 0.1, 0.0, 0.6);
         // Filled (bright green)
@@ -1246,11 +1247,11 @@ pub const Engine = struct {
         }
 
         // === HOTBAR (bottom-center, Minecraft-style) ===
-        const slot_size: f32 = 22.0;
-        const slot_gap: f32 = 2.0;
+        const slot_size: f32 = 36.0;
+        const slot_gap: f32 = 3.0;
         const hotbar_total = 9.0 * slot_size + 8.0 * slot_gap;
         const hotbar_x = (sw - hotbar_total) / 2.0;
-        const hotbar_y: f32 = sh - 26.0;
+        const hotbar_y: f32 = sh - 42.0;
         // Hotbar background
         count = addQuad(&verts, count, hotbar_x - 4, hotbar_y - 4, hotbar_total + 8, slot_size + 8, 0.1, 0.1, 0.1, 0.75);
         var slot_i: u32 = 0;
@@ -1268,7 +1269,10 @@ pub const Engine = struct {
                 const tex_idx: u16 = @intCast(@min(slot.item, 119));
                 const uv0 = texture_atlas_mod.getUV(tex_idx, 3);
                 const uv1 = texture_atlas_mod.getUV(tex_idx, 1);
-                count = addTexQuad(&verts, count, sx + 3, hotbar_y + 3, slot_size - 6, slot_size - 6, 1, 1, 1, 1, uv0[0], uv0[1], uv1[0], uv1[1]);
+                count = addTexQuad(&verts, count, sx + 4, hotbar_y + 4, slot_size - 8, slot_size - 8, 1, 1, 1, 1, uv0[0], uv0[1], uv1[0], uv1[1]);
+                if (slot.count > 1) {
+                    count = drawNumberShadowed(&verts, count, sx + slot_size - 14, hotbar_y + slot_size - 10, slot.count, 2.0, 1, 1, 1);
+                }
             }
         }
 
@@ -1354,10 +1358,10 @@ pub const Engine = struct {
 
         // === INVENTORY SCREEN (E key) ===
         if (self.inventory_open) {
-            const slot_s: f32 = 40.0;
+            const slot_s: f32 = 48.0;
             const slot_pad: f32 = 4.0;
             const inv_w: f32 = 9.0 * (slot_s + slot_pad) + 24.0;
-            const inv_h: f32 = 420.0;
+            const inv_h: f32 = 500.0;
             const inv_x = (sw - inv_w) / 2.0;
             const inv_y = (sh - inv_h) / 2.0;
 
@@ -1456,7 +1460,7 @@ pub const Engine = struct {
                             const iuv1 = texture_atlas_mod.getUV(itid, 1);
                             count = addTexQuad(&verts, count, sx + 5, sy + 5, slot_s - 10, slot_s - 10, 1, 1, 1, 1, iuv0[0], iuv0[1], iuv1[0], iuv1[1]);
                             if (slot.count > 1) {
-                                count = addQuad(&verts, count, sx + slot_s - 12, sy + slot_s - 12, 10, 10, 1, 1, 1, 0.8);
+                                count = drawNumberShadowed(&verts, count, sx + slot_s - 16, sy + slot_s - 12, slot.count, 2.0, 1, 1, 1);
                             }
                         }
                     }
@@ -1481,7 +1485,7 @@ pub const Engine = struct {
                     const huv1 = texture_atlas_mod.getUV(htid, 1);
                     count = addTexQuad(&verts, count, hx + 5, hb_y + 5, slot_s - 10, slot_s - 10, 1, 1, 1, 1, huv0[0], huv0[1], huv1[0], huv1[1]);
                     if (slot.count > 1) {
-                        count = addQuad(&verts, count, hx + slot_s - 12, hb_y + slot_s - 12, 10, 10, 1, 1, 1, 0.8);
+                        count = drawNumberShadowed(&verts, count, hx + slot_s - 16, hb_y + slot_s - 12, slot.count, 2.0, 1, 1, 1);
                     }
                 }
             }
@@ -1644,6 +1648,35 @@ pub const Engine = struct {
         verts[start + 4] = V{ .pos_x = x + w, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a, .u = uv_r, .v = uv_b };
         verts[start + 5] = V{ .pos_x = x, .pos_y = y + h, .r = r, .g = g, .b = b, .a = a, .u = uv_l, .v = uv_b };
         return start + 6;
+    }
+
+    fn drawNumber(verts: []ui_pipeline_mod.UiVertex, start: u32, x: f32, y: f32, value: u32, scale: f32, r: f32, g: f32, b: f32, a: f32) u32 {
+        var c = start;
+        const num_digits = bitmap_font.digitCount(value);
+        const char_w = @as(f32, @floatFromInt(bitmap_font.GLYPH_W)) * scale + scale;
+        var di: u32 = 0;
+        while (di < num_digits) : (di += 1) {
+            const digit = bitmap_font.getDigit(value, num_digits - 1 - di);
+            const dx = x + @as(f32, @floatFromInt(di)) * char_w;
+            var py: u32 = 0;
+            while (py < bitmap_font.GLYPH_H) : (py += 1) {
+                var px_i: u32 = 0;
+                while (px_i < bitmap_font.GLYPH_W) : (px_i += 1) {
+                    if (bitmap_font.getPixel(digit, px_i, py)) {
+                        c = addQuad(verts, c, dx + @as(f32, @floatFromInt(px_i)) * scale, y + @as(f32, @floatFromInt(py)) * scale, scale, scale, r, g, b, a);
+                    }
+                }
+            }
+        }
+        // Drop shadow: draw same number offset by 1px in black (behind)
+        return c;
+    }
+
+    fn drawNumberShadowed(verts: []ui_pipeline_mod.UiVertex, start: u32, x: f32, y: f32, value: u32, scale: f32, r: f32, g: f32, b: f32) u32 {
+        var c = start;
+        c = drawNumber(verts, c, x + 1, y + 1, value, scale, 0.1, 0.1, 0.1, 0.9);
+        c = drawNumber(verts, c, x, y, value, scale, r, g, b, 1.0);
+        return c;
     }
 
     fn updateChunkLoading(self: *Engine) void {
@@ -2400,14 +2433,20 @@ pub const Engine = struct {
             self.particle_manager.emitBlockBreak(fx, fy, fz, color[0], color[1], color[2]);
 
             const loot = loot_mod.getBlockLoot(old_block);
-            const fortune: u8 = 0; // TODO: get from equipped tool
+            const fortune: u8 = 0;
             const result = loot_mod.rollLoot(loot, fortune, @intCast(self.game_time.tick));
+            var dropped_anything = false;
             for (0..result.item_count) |i| {
                 if (result.items[i]) |item| {
                     if (item.count > 0) {
                         self.drop_manager.spawnDrop(fx, fy, fz, item.id, item.count) catch {};
+                        dropped_anything = true;
                     }
                 }
+            }
+            // If no loot table entry, drop the block itself (most blocks drop themselves)
+            if (!dropped_anything and loot.entries.len == 0) {
+                self.drop_manager.spawnDrop(fx, fy, fz, @intCast(old_block), 1) catch {};
             }
             if (result.xp > 0) self.xp.addXP(result.xp);
         }
