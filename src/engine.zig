@@ -553,6 +553,7 @@ pub const Engine = struct {
                     self.chat_open = false;
                 } else if (self.inventory_open) {
                     self.inventory_open = false;
+                    self.returnCursorAndCraftItems();
                     self.window.handle.setInputMode(.cursor, .disabled) catch {};
                     self.first_mouse = true;
                 } else {
@@ -622,6 +623,7 @@ pub const Engine = struct {
                 if (self.inventory_open) {
                     self.window.handle.setInputMode(.cursor, .normal) catch {};
                 } else {
+                    self.returnCursorAndCraftItems();
                     self.window.handle.setInputMode(.cursor, .disabled) catch {};
                     self.first_mouse = true;
                 }
@@ -1442,7 +1444,7 @@ pub const Engine = struct {
 
             // === Main inventory (3 rows x 9 columns) ===
             const grid_x = inv_x + 12;
-            const grid_y = inv_y + 200;
+            const grid_y = inv_y + 240;
             var row: u32 = 0;
             while (row < 3) : (row += 1) {
                 var col: u32 = 0;
@@ -1521,14 +1523,14 @@ pub const Engine = struct {
 
         const sw: f32 = @floatFromInt(self.renderer.swapchain_extent.width);
         const sh: f32 = @floatFromInt(self.renderer.swapchain_extent.height);
-        const slot_s: f32 = 40.0;
+        const slot_s: f32 = 48.0;
         const slot_pad: f32 = 4.0;
         const inv_w: f32 = 9.0 * (slot_s + slot_pad) + 24.0;
-        const inv_h: f32 = 420.0;
+        const inv_h: f32 = 500.0;
         const inv_x = (sw - inv_w) / 2.0;
         const inv_y = (sh - inv_h) / 2.0;
         const grid_x = inv_x + 12;
-        const grid_y = inv_y + 200;
+        const grid_y = inv_y + 240;
 
         // Check crafting grid (2x2) clicks
         const craft_x = inv_x + inv_w - 120;
@@ -1584,6 +1586,20 @@ pub const Engine = struct {
     fn swapCursorWithSlot(self: *Engine, slot_idx: u8) void {
         if (slot_idx >= inventory_mod.SLOT_COUNT) return;
         const slot_val = self.inventory.getSlot(slot_idx);
+
+        // Same item type: stack cursor onto slot
+        if (!self.cursor_item.isEmpty() and !slot_val.isEmpty() and self.cursor_item.item == slot_val.item) {
+            const space = inventory_mod.STACK_MAX - slot_val.count;
+            if (space > 0) {
+                const to_add = @min(space, self.cursor_item.count);
+                self.inventory.slots[slot_idx].count += to_add;
+                self.cursor_item.count -= to_add;
+                if (self.cursor_item.count == 0) self.cursor_item = inventory_mod.Slot.empty;
+            }
+            return;
+        }
+
+        // Different items or one empty: swap
         self.inventory.slots[slot_idx] = self.cursor_item;
         self.cursor_item = slot_val;
     }
@@ -1591,12 +1607,23 @@ pub const Engine = struct {
     fn swapCursorWithCraftSlot(self: *Engine, craft_idx: u8) void {
         if (craft_idx >= 4) return;
         const slot_val = self.craft_grid[craft_idx];
+
+        if (!self.cursor_item.isEmpty() and !slot_val.isEmpty() and self.cursor_item.item == slot_val.item) {
+            const space = inventory_mod.STACK_MAX - slot_val.count;
+            if (space > 0) {
+                const to_add = @min(space, self.cursor_item.count);
+                self.craft_grid[craft_idx].count += to_add;
+                self.cursor_item.count -= to_add;
+                if (self.cursor_item.count == 0) self.cursor_item = inventory_mod.Slot.empty;
+            }
+            return;
+        }
+
         self.craft_grid[craft_idx] = self.cursor_item;
         self.cursor_item = slot_val;
     }
 
     fn getCraftResult(self: *const Engine) ?crafting_mod.Recipe {
-        // Build a 3x3 grid from the 2x2 crafting slots (placed in top-left)
         const grid: [3][3]crafting_mod.ItemId = .{
             .{ self.craft_grid[0].item, self.craft_grid[1].item, 0 },
             .{ self.craft_grid[2].item, self.craft_grid[3].item, 0 },
@@ -1607,14 +1634,12 @@ pub const Engine = struct {
 
     fn tryCraft(self: *Engine) void {
         const result = self.getCraftResult() orelse return;
-        // Consume 1 from each crafting slot that has an item
         for (&self.craft_grid) |*slot| {
             if (!slot.isEmpty()) {
                 slot.count -= 1;
                 if (slot.count == 0) slot.* = inventory_mod.Slot.empty;
             }
         }
-        // Give result to cursor or add to inventory
         if (self.cursor_item.isEmpty()) {
             self.cursor_item = .{ .item = result.result_item, .count = result.result_count };
         } else if (self.cursor_item.item == result.result_item and
@@ -1623,6 +1648,19 @@ pub const Engine = struct {
             self.cursor_item.count += result.result_count;
         } else {
             _ = self.inventory.addItem(result.result_item, result.result_count);
+        }
+    }
+
+    fn returnCursorAndCraftItems(self: *Engine) void {
+        if (!self.cursor_item.isEmpty()) {
+            _ = self.inventory.addItem(self.cursor_item.item, self.cursor_item.count);
+            self.cursor_item = inventory_mod.Slot.empty;
+        }
+        for (&self.craft_grid) |*slot| {
+            if (!slot.isEmpty()) {
+                _ = self.inventory.addItem(slot.item, slot.count);
+                slot.* = inventory_mod.Slot.empty;
+            }
         }
     }
 
