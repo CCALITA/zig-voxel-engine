@@ -2126,6 +2126,9 @@ pub const Engine = struct {
 
                 if (target_bid == block.FURNACE) {
                     self.interactFurnace(hit.bx, hit.by, hit.bz);
+                } else if (target_bid == block.CRAFTING_TABLE_BLOCK) {
+                    self.inventory_open = true;
+                    self.window.handle.setInputMode(.cursor, .normal) catch {};
                 } else if (target_bid == ENCHANTING_TABLE_BLOCK_ID) {
                     self.interactEnchantingTable();
                 } else if (target_bid == block.ANVIL) {

@@ -284,6 +284,8 @@ const T_COPPER_BLOCK: u16 = 120;
 const T_EXPOSED_COPPER: u16 = 121;
 const T_WEATHERED_COPPER: u16 = 122;
 const T_OXIDIZED_COPPER: u16 = 123;
+const T_CRAFTING_TABLE_TOP: u16 = 124;
+const T_CRAFTING_TABLE_SIDE: u16 = 125;
 
 fn allFaces(tex: u16) [6]u16 {
     return .{ tex, tex, tex, tex, tex, tex };
@@ -439,7 +441,7 @@ pub const BLOCKS = [_]BlockDef{
     .{ .name = "composter", .tex = allFaces(T_PLANKS) }, // 107
     .{ .name = "lectern", .tex = allFaces(T_PLANKS) }, // 108
     .{ .name = "ender_chest", .tex = topBottomSide(T_OBSIDIAN, T_OBSIDIAN, T_OBSIDIAN) }, // 109
-    .{ .name = "crafting_table", .tex = topBottomSide(T_PLANKS, T_PLANKS, T_PLANKS) }, // 110
+    .{ .name = "crafting_table", .tex = topBottomSide(T_CRAFTING_TABLE_TOP, T_PLANKS, T_CRAFTING_TABLE_SIDE) }, // 110
 };
 
 pub fn get(id: BlockId) BlockDef {

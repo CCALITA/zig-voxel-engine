@@ -95,6 +95,9 @@ fn init_base_colors() [256]Rgb {
     c[121] = .{ 166, 128, 90 };
     c[122] = .{ 115, 140, 115 };
     c[123] = .{ 76, 166, 140 };
+    // Crafting table
+    c[124] = .{ 178, 140, 76 }; // top (planks-ish with grid)
+    c[125] = .{ 178, 140, 76 }; // side (planks with tool silhouettes)
     return c;
 }
 
@@ -250,6 +253,8 @@ fn generatePixel(idx: u32, x: u32, y: u32) Pixel {
         121 => genExposedCopper(x, y, h),
         122 => genWeatheredCopper(x, y, h),
         123 => genOxidizedCopper(x, y, h),
+        124 => genCraftingTableTop(x, y, h),
+        125 => genCraftingTableSide(x, y, h),
         else => mixColor(base, if (fine_i32 > noise_i32) fine_i32 else noise_i32),
     };
 }
@@ -1225,6 +1230,38 @@ pub fn getUV(tex_index: u16, corner: u2) [2]f32 {
 pub fn getTileColor(tex_index: u8) [3]f32 {
     const c = base_colors[tex_index];
     return .{ @as(f32, @floatFromInt(c[0])) / 255.0, @as(f32, @floatFromInt(c[1])) / 255.0, @as(f32, @floatFromInt(c[2])) / 255.0 };
+}
+
+fn genCraftingTableTop(x: u32, y: u32, h: u32) Pixel {
+    // 4x4 grid pattern: alternating light and dark wood quadrants
+    const qx = (x / 4) % 2;
+    const qy = (y / 4) % 2;
+    const n = noise16(h);
+    if (x == 0 or x == 15 or y == 0 or y == 15) return .{ .r = clampU8(90 + n), .g = clampU8(60 + n), .b = clampU8(30 + n), .a = 255 };
+    if (qx != qy) {
+        return .{ .r = clampU8(190 + n), .g = clampU8(150 + n), .b = clampU8(85 + n), .a = 255 };
+    }
+    return .{ .r = clampU8(160 + n), .g = clampU8(120 + n), .b = clampU8(65 + n), .a = 255 };
+}
+
+fn genCraftingTableSide(x: u32, y: u32, h: u32) Pixel {
+    const n = noise16(h);
+    // Dark frame border
+    if (x == 0 or x == 15 or y == 0 or y == 15) return .{ .r = clampU8(90 + n), .g = clampU8(60 + n), .b = clampU8(30 + n), .a = 255 };
+    // Tool silhouettes: saw (left half) and hammer (right half)
+    if (x < 8) {
+        // Saw teeth pattern
+        if (y >= 3 and y <= 12 and x == 3) return px(60, 60, 65);
+        if (y >= 3 and y <= 12 and x == 4 and y % 2 == 0) return px(60, 60, 65);
+    } else {
+        // Hammer shape
+        if (y >= 3 and y <= 5 and x >= 10 and x <= 13) return px(60, 60, 65);
+        if (y >= 6 and y <= 11 and x == 11) return .{ .r = clampU8(120 + n), .g = clampU8(85 + n), .b = clampU8(40 + n), .a = 255 };
+    }
+    // Wood plank base
+    const band = (y +% (h >> 8) % 2) % 5;
+    if (band == 0) return .{ .r = clampU8(150 + n), .g = clampU8(110 + n), .b = clampU8(55 + n), .a = 255 };
+    return .{ .r = clampU8(178 + n), .g = clampU8(140 + n), .b = clampU8(76 + n), .a = 255 };
 }
 
 test "atlas tile generation" {
