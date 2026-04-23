@@ -329,23 +329,22 @@ pub fn render(verts: []UiVertex, start: u32, sw: f32, sh: f32, worlds: [5]?World
 
     // 4. Action buttons (bottom of panel, evenly spaced)
     const by = btnY(sh);
-    const total_btn_w = btn_w * 3.0 + btn_gap * 2.0;
-    const btn_start_x = px + (panel_w - total_btn_w) * 0.5;
+    const bsx = btnStartX(sw);
     const btn_label_scale: f32 = 1.5;
     const btn_label_y_pad = (btn_h - 5.0 * btn_label_scale) * 0.5;
 
     // Create New button
-    const create_x = btn_start_x;
+    const create_x = bsx;
     idx = addQuad(verts, idx, create_x, by, btn_w, btn_h, create_btn_col);
     idx = drawLabel(verts, idx, create_x + btn_w * 0.5, by + btn_label_y_pad, &create_glyphs, btn_label_scale, label_col);
 
     // Play button
-    const play_x = btn_start_x + btn_w + btn_gap;
+    const play_x = bsx + btn_w + btn_gap;
     idx = addQuad(verts, idx, play_x, by, btn_w, btn_h, play_btn_col);
     idx = drawLabel(verts, idx, play_x + btn_w * 0.5, by + btn_label_y_pad, &play_glyphs, btn_label_scale, label_col);
 
     // Delete button
-    const del_x = btn_start_x + (btn_w + btn_gap) * 2.0;
+    const del_x = bsx + (btn_w + btn_gap) * 2.0;
     idx = addQuad(verts, idx, del_x, by, btn_w, btn_h, delete_btn_col);
     idx = drawLabel(verts, idx, del_x + btn_w * 0.5, by + btn_label_y_pad, &delete_glyphs, btn_label_scale, label_col);
 
@@ -374,21 +373,19 @@ pub fn hitTest(mx: f32, my: f32, sw: f32, sh: f32) ?HitResult {
 
     // Check buttons
     const by = btnY(sh);
-    const px_val = panelX(sw);
-    const total_btn_w = btn_w * 3.0 + btn_gap * 2.0;
-    const btn_start_x = px_val + (panel_w - total_btn_w) * 0.5;
+    const bsx = btnStartX(sw);
 
-    const create_x = btn_start_x;
+    const create_x = bsx;
     if (mx >= create_x and mx <= create_x + btn_w and my >= by and my <= by + btn_h) {
         return .create_new;
     }
 
-    const play_x = btn_start_x + btn_w + btn_gap;
+    const play_x = bsx + btn_w + btn_gap;
     if (mx >= play_x and mx <= play_x + btn_w and my >= by and my <= by + btn_h) {
         return .play;
     }
 
-    const del_x = btn_start_x + (btn_w + btn_gap) * 2.0;
+    const del_x = bsx + (btn_w + btn_gap) * 2.0;
     if (mx >= del_x and mx <= del_x + btn_w and my >= by and my <= by + btn_h) {
         return .delete;
     }
@@ -479,10 +476,8 @@ test "hitTest returns create_new for click on create button" {
     const sw: f32 = 800.0;
     const sh: f32 = 600.0;
     const by = btnY(sh);
-    const px_val = panelX(sw);
-    const total_btn_w = btn_w * 3.0 + btn_gap * 2.0;
-    const btn_start_x = px_val + (panel_w - total_btn_w) * 0.5;
-    const mx = btn_start_x + btn_w * 0.5;
+    const bsx = btnStartX(sw);
+    const mx = bsx + btn_w * 0.5;
     const my = by + btn_h * 0.5;
     const result = hitTest(mx, my, sw, sh);
     try std.testing.expect(result != null);
@@ -493,10 +488,8 @@ test "hitTest returns play for click on play button" {
     const sw: f32 = 800.0;
     const sh: f32 = 600.0;
     const by = btnY(sh);
-    const px_val = panelX(sw);
-    const total_btn_w = btn_w * 3.0 + btn_gap * 2.0;
-    const btn_start_x = px_val + (panel_w - total_btn_w) * 0.5;
-    const mx = btn_start_x + btn_w + btn_gap + btn_w * 0.5;
+    const bsx = btnStartX(sw);
+    const mx = bsx + btn_w + btn_gap + btn_w * 0.5;
     const my = by + btn_h * 0.5;
     const result = hitTest(mx, my, sw, sh);
     try std.testing.expect(result != null);
@@ -507,10 +500,8 @@ test "hitTest returns delete for click on delete button" {
     const sw: f32 = 800.0;
     const sh: f32 = 600.0;
     const by = btnY(sh);
-    const px_val = panelX(sw);
-    const total_btn_w = btn_w * 3.0 + btn_gap * 2.0;
-    const btn_start_x = px_val + (panel_w - total_btn_w) * 0.5;
-    const mx = btn_start_x + (btn_w + btn_gap) * 2.0 + btn_w * 0.5;
+    const bsx = btnStartX(sw);
+    const mx = bsx + (btn_w + btn_gap) * 2.0 + btn_w * 0.5;
     const my = by + btn_h * 0.5;
     const result = hitTest(mx, my, sw, sh);
     try std.testing.expect(result != null);
