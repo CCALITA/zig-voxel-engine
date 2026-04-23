@@ -285,14 +285,14 @@ test "render returns more vertices than start index" {
 }
 
 test "render with start offset preserves offset" {
-    var buf: [max_vertices * 8]UiVertex = undefined;
+    var buf: [max_vertices]UiVertex = undefined;
     const count = render(&buf, 12, 800.0, 600.0, .{});
     try std.testing.expect(count >= 12);
     try std.testing.expect((count - 12) % 6 == 0);
 }
 
 test "overlay covers full screen" {
-    var buf: [max_vertices * 8]UiVertex = undefined;
+    var buf: [max_vertices]UiVertex = undefined;
     const sw: f32 = 1024.0;
     const sh: f32 = 768.0;
     _ = render(&buf, 0, sw, sh, .{});
@@ -304,7 +304,7 @@ test "overlay covers full screen" {
 }
 
 test "panel is centered on screen" {
-    var buf: [max_vertices * 8]UiVertex = undefined;
+    var buf: [max_vertices]UiVertex = undefined;
     const sw: f32 = 800.0;
     const sh: f32 = 600.0;
     _ = render(&buf, 0, sw, sh, .{});
@@ -373,8 +373,8 @@ test "addQuad overflow protection" {
 }
 
 test "slider fill scales with setting value" {
-    var buf_low: [max_vertices * 8]UiVertex = undefined;
-    var buf_high: [max_vertices * 8]UiVertex = undefined;
+    var buf_low: [max_vertices]UiVertex = undefined;
+    var buf_high: [max_vertices]UiVertex = undefined;
     const low_settings = Settings{ .render_distance = 2, .fov = 70, .difficulty = 2, .music_vol = 100, .sound_vol = 100, .sensitivity = 50 };
     const high_settings = Settings{ .render_distance = 32, .fov = 70, .difficulty = 2, .music_vol = 100, .sound_vol = 100, .sensitivity = 50 };
     const count_low = render(&buf_low, 0, 800.0, 600.0, low_settings);
@@ -387,8 +387,8 @@ test "slider fill scales with setting value" {
 }
 
 test "render produces consistent output for same inputs" {
-    var buf1: [max_vertices * 8]UiVertex = undefined;
-    var buf2: [max_vertices * 8]UiVertex = undefined;
+    var buf1: [max_vertices]UiVertex = undefined;
+    var buf2: [max_vertices]UiVertex = undefined;
     const s = Settings{};
     const count1 = render(&buf1, 0, 1280.0, 720.0, s);
     const count2 = render(&buf2, 0, 1280.0, 720.0, s);
