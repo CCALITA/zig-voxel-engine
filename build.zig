@@ -541,6 +541,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_hunger_system_tests = b.addRunArtifact(hunger_system_tests);
 
+    // Status effect manager tests
+    const status_effect_manager_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/status_effect_manager.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_status_effect_manager_tests = b.addRunArtifact(status_effect_manager_tests);
+
     // Water renderer tests
     const water_renderer_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -600,4 +610,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_redstone_components_tests.step);
     test_step.dependOn(&run_hunger_system_tests.step);
     test_step.dependOn(&run_water_renderer_tests.step);
+    test_step.dependOn(&run_status_effect_manager_tests.step);
 }
