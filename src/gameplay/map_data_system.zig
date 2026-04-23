@@ -122,10 +122,7 @@ test "default MapData is not initialized" {
 test "setPixel and getPixel round-trip" {
     var map = MapData.init(0, 0, .z0);
     map.setPixel(10, 20, 255, 128, 0);
-    const color = map.getPixel(10, 20);
-    try std.testing.expectEqual(@as(u8, 255), color[0]);
-    try std.testing.expectEqual(@as(u8, 128), color[1]);
-    try std.testing.expectEqual(@as(u8, 0), color[2]);
+    try std.testing.expectEqual([3]u8{ 255, 128, 0 }, map.getPixel(10, 20));
 }
 
 test "setPixel overwrites previous value" {
