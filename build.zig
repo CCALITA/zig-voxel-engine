@@ -571,6 +571,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_combat_system_tests = b.addRunArtifact(combat_system_tests);
 
+    // FOV effects tests
+    const fov_effects_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/fov_effects.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_fov_effects_tests = b.addRunArtifact(fov_effects_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -622,4 +632,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_water_renderer_tests.step);
     test_step.dependOn(&run_status_effect_manager_tests.step);
     test_step.dependOn(&run_combat_system_tests.step);
+    test_step.dependOn(&run_fov_effects_tests.step);
 }
