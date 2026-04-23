@@ -108,6 +108,90 @@ const campfire_ui_mod = @import("gameplay/campfire_ui.zig");
 const brew_modifiers = @import("gameplay/recipes_brewing_modifiers.zig");
 const block_variants_mod = @import("world/block_variants.zig");
 const block_shapes_mod = @import("world/block_shapes.zig");
+// Gameplay systems (batches 5-10)
+const bed_system_mod = @import("gameplay/bed_system.zig");
+const bone_meal_mod = @import("gameplay/bone_meal.zig");
+const bucket_mod = @import("gameplay/bucket_mechanics.zig");
+const combat_int = @import("gameplay/combat_integration.zig");
+const combat_sys = @import("gameplay/combat_system.zig");
+const container_mod = @import("gameplay/container_system.zig");
+const crafting_int = @import("gameplay/crafting_integration.zig");
+const crop_mod = @import("gameplay/crop_growth.zig");
+const death_drops_mod = @import("gameplay/death_drops.zig");
+const death_respawn = @import("gameplay/death_respawn_bridge.zig");
+const difficulty_mod = @import("gameplay/difficulty_system.zig");
+const drowning_mod = @import("gameplay/drowning_system.zig");
+const durability_mod = @import("gameplay/durability_system.zig");
+const effects_int = @import("gameplay/effects_integration.zig");
+const elytra_mod = @import("gameplay/elytra_physics.zig");
+const enchant_apply_mod = @import("gameplay/enchant_apply.zig");
+const ender_pearl_mod = @import("gameplay/ender_pearl.zig");
+const fall_damage_mod = @import("gameplay/fall_damage_system.zig");
+const fire_damage_mod = @import("gameplay/fire_damage.zig");
+const fishing_loop = @import("gameplay/fishing_game_loop.zig");
+const fov_mod = @import("gameplay/fov_effects.zig");
+const hunger_mod = @import("gameplay/hunger_system.zig");
+const inv_persist = @import("gameplay/inventory_persistence.zig");
+const keybind_mod = @import("gameplay/keybind_system.zig");
+const ladder_mod = @import("gameplay/ladder_climbing.zig");
+const leash_mod = @import("gameplay/leash_system.zig");
+const left_click_mod = @import("gameplay/left_click_dispatch.zig");
+const map_data_mod = @import("gameplay/map_data_system.zig");
+const mouse_mod = @import("gameplay/mouse_input.zig");
+const piston_anim = @import("gameplay/piston_animation.zig");
+const player_dmg = @import("gameplay/player_damage_tick.zig");
+const portal_mod = @import("gameplay/portal_mechanics.zig");
+const respawn_mod = @import("gameplay/respawn_system.zig");
+const right_click_mod = @import("gameplay/right_click_dispatch.zig");
+const save_load = @import("gameplay/save_load_bridge.zig");
+const sleep_mod = @import("gameplay/sleep_system.zig");
+const sprint_mod = @import("gameplay/sprint_system.zig");
+const station_router = @import("gameplay/station_router.zig");
+const status_fx = @import("gameplay/status_effect_manager.zig");
+const swim_mod = @import("gameplay/swimming_system.zig");
+const tick_int = @import("gameplay/tick_integration.zig");
+const tool_use_mod = @import("gameplay/tool_use_items.zig");
+const world_save = @import("gameplay/world_save_system.zig");
+const xp_orbs_mod = @import("gameplay/xp_orbs.zig");
+
+// Entity systems
+const dragon_fight = @import("entity/ender_dragon_fight.zig");
+const mob_ai = @import("entity/mob_ai_combat.zig");
+const nat_spawn = @import("entity/natural_spawning.zig");
+const villager_trade = @import("entity/villager_trading.zig");
+const wither_fight_mod = @import("entity/wither_fight.zig");
+
+// Redstone
+const signal_prop = @import("redstone/signal_propagation.zig");
+
+// Renderers (visual effects)
+const anim_tex = @import("renderer/animated_textures.zig");
+const beacon_beam_mod = @import("renderer/beacon_beam.zig");
+const block_sel = @import("renderer/block_selection_box.zig");
+const campfire_fx = @import("renderer/campfire_particles.zig");
+const chest_mdl = @import("renderer/chest_model.zig");
+const enchant_vis = @import("renderer/enchanting_visual.zig");
+const end_portal_vis = @import("renderer/end_portal_visual.zig");
+const entity_hit = @import("renderer/entity_hit_effect.zig");
+const explosion_vis = @import("renderer/explosion_visual.zig");
+const footstep_fx = @import("renderer/footstep_particles.zig");
+const item_ent_render = @import("renderer/item_entity_renderer.zig");
+const item_pickup = @import("renderer/item_pickup_anim.zig");
+const lava_pop_mod = @import("renderer/lava_pop.zig");
+const nether_portal_vis = @import("renderer/nether_portal_visual.zig");
+const note_vis = @import("renderer/note_block_visual.zig");
+const particle_fx = @import("renderer/particle_effects.zig");
+const sign_banner_mod = @import("renderer/sign_banner.zig");
+const sky_render = @import("renderer/sky_renderer.zig");
+const smoke_fx = @import("renderer/smoke_particles.zig");
+const sprint_fx = @import("renderer/sprint_particles.zig");
+const torch_fx = @import("renderer/torch_flame.zig");
+const water_render = @import("renderer/water_renderer.zig");
+const water_splash_mod = @import("renderer/water_splash.zig");
+const xp_orb_vis = @import("renderer/xp_orb_visual.zig");
+
+// UI screens
+const sound_mgr = @import("audio/sound_manager.zig");
 
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
