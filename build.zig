@@ -581,6 +581,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_combat_integration_tests = b.addRunArtifact(combat_integration_tests);
 
+    // Left-click dispatch tests
+    const left_click_dispatch_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/left_click_dispatch.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_left_click_dispatch_tests = b.addRunArtifact(left_click_dispatch_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -633,4 +643,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_status_effect_manager_tests.step);
     test_step.dependOn(&run_combat_system_tests.step);
     test_step.dependOn(&run_combat_integration_tests.step);
+    test_step.dependOn(&run_left_click_dispatch_tests.step);
 }
