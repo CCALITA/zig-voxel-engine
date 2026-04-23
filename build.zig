@@ -531,6 +531,16 @@ pub fn build(b: *std.Build) void {
     });
     const run_redstone_components_tests = b.addRunArtifact(redstone_components_tests);
 
+    // Hunger system tests
+    const hunger_system_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/gameplay/hunger_system.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_hunger_system_tests = b.addRunArtifact(hunger_system_tests);
+
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
@@ -578,4 +588,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_creeper_tests.step);
     test_step.dependOn(&run_wither_boss_tests.step);
     test_step.dependOn(&run_redstone_components_tests.step);
+    test_step.dependOn(&run_hunger_system_tests.step);
 }
