@@ -92,6 +92,7 @@ const recipes_special = @import("gameplay/recipes_special.zig");
 const item_registry_mod = @import("gameplay/item_registry.zig");
 const item_slot_mod = @import("gameplay/item_slot.zig");
 const enchant_effects = @import("gameplay/enchantment_effects.zig");
+const harvest_rules_mod = @import("gameplay/harvest_rules.zig");
 const armor_equip_mod = @import("gameplay/armor_equip.zig");
 const recipe_discovery_mod = @import("gameplay/recipe_discovery.zig");
 const smelting_recipes_mod = @import("gameplay/smelting_recipes.zig");
