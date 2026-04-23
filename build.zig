@@ -21,6 +21,10 @@ pub fn build(b: *std.Build) void {
     const zglfw_mod = zglfw_dep.module("root");
 
     // --- World modules (shared between engine and physics) ---
+    const bitmap_font_mod = b.addModule("bitmap_font", .{
+        .root_source_file = b.path("src/renderer/bitmap_font.zig"),
+        .target = target,
+    });
     const block_mod = b.addModule("block", .{
         .root_source_file = b.path("src/world/block.zig"),
         .target = target,
@@ -582,6 +586,20 @@ pub fn build(b: *std.Build) void {
     const run_combat_integration_tests = b.addRunArtifact(combat_integration_tests);
 
     const test_step = b.step("test", "Run tests");
+
+    // Coordinate display tests
+    const coordinate_display_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/ui/coordinate_display.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "bitmap_font", .module = bitmap_font_mod },
+            },
+        }),
+    });
+    const run_coordinate_display_tests = b.addRunArtifact(coordinate_display_tests);
+
     test_step.dependOn(&run_engine_tests.step);
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_physics_collision_tests.step);
@@ -633,4 +651,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_status_effect_manager_tests.step);
     test_step.dependOn(&run_combat_system_tests.step);
     test_step.dependOn(&run_combat_integration_tests.step);
+    test_step.dependOn(&run_coordinate_display_tests.step);
 }
