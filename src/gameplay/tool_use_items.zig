@@ -24,7 +24,6 @@ const BlockId = struct {
     const TNT: u16 = 20;
     const COBWEB: u16 = 100;
     const FIRE: u16 = 51;
-    const WHITE_WOOL: u16 = 71;
 };
 
 // -------------------------------------------------------------------------
