@@ -193,6 +193,23 @@ const xp_orb_vis = @import("renderer/xp_orb_visual.zig");
 // UI screens
 const sound_mgr = @import("audio/sound_manager.zig");
 
+// Latest batch modules
+const crosshair_info_mod = @import("ui/crosshair_info.zig");
+const armor_bar_mod = @import("ui/armor_bar_display.zig");
+const item_tooltip_mod = @import("ui/item_tooltip.zig");
+const fishing_bobber_mod = @import("renderer/fishing_bobber.zig");
+const creeper_flash_mod = @import("renderer/creeper_flash.zig");
+const enderman_tp = @import("renderer/enderman_teleport.zig");
+const guardian_beam_mod = @import("renderer/guardian_beam.zig");
+const blaze_ai_mod = @import("entity/blaze_fireball.zig");
+const golem_spawn = @import("entity/iron_golem_spawn.zig");
+const skeleton_ai = @import("entity/skeleton_arrow_ai.zig");
+const spider_climb_mod = @import("entity/spider_climb.zig");
+const baby_zombie_mod = @import("entity/baby_zombie.zig");
+const trident_mod = @import("gameplay/trident_throw.zig");
+const shield_mod = @import("gameplay/shield_blocking.zig");
+const bow_mod = @import("gameplay/bow_charging.zig");
+
 const SEED: u64 = 42;
 const RENDER_RADIUS: i32 = 6;
 
